@@ -1,0 +1,156 @@
+# Telmux-rs 示例配置
+# 对应 `cargo run --example mock_pcba` 启动的模拟 PCBA 从站寄存器映射。
+
+[general]
+log_level = "info"
+
+[[devices]]
+name = "pcba-01"
+transport = "tcp"
+host = "127.0.0.1"
+port = 1502
+unit_id = 1
+poll_interval_ms = 1000
+timeout_ms = 500
+reconnect_initial_ms = 1000
+reconnect_max_ms = 15000
+
+[[devices.registers]]
+name = "cpu_temp_raw"
+sensor_id = "pcba-01.cpu_temp"
+function = "holding"
+address = 0
+value_type = "u16"
+unit = "counts"
+
+[[devices.registers]]
+name = "fan_speed_raw"
+sensor_id = "pcba-01.fan_speed"
+function = "holding"
+address = 1
+value_type = "u16"
+unit = "counts"
+
+[[devices.registers]]
+name = "uptime_ticks"
+sensor_id = "pcba-01.uptime_ticks"
+function = "holding"
+address = 2
+count = 2
+value_type = "u32"
+word_order = "big"
+unit = "ticks"
+
+[[devices.registers]]
+name = "vcore_raw"
+sensor_id = "pcba-01.vcore"
+function = "holding"
+address = 4
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "V"
+
+[[devices.registers]]
+name = "vin_raw"
+sensor_id = "pcba-01.vin"
+function = "input"
+address = 0
+value_type = "u16"
+unit = "mV"
+
+[[devices.registers]]
+name = "iin_raw"
+sensor_id = "pcba-01.iin"
+function = "input"
+address = 1
+value_type = "u16"
+unit = "mA"
+
+# RTU 设备示例（真实串口，基于 tokio-serial）：
+# [[devices]]
+# name = "pcba-02"
+# transport = "rtu"
+# serial_port = "COM3"
+# baud_rate = 9600
+# unit_id = 2
+# poll_interval_ms = 2000
+#
+# [[devices.registers]]
+# name = "temp_raw"
+# sensor_id = "pcba-02.temp"
+# function = "holding"
+# address = 0
+# value_type = "u16"
+
+# ===== 处理管道（阶段 3）：原始值 -> 换算 -> 滤波 -> 阈值 =====
+# 每个 pipeline 通过 sensor_id 绑定一个寄存器；stage 按顺序执行。
+
+# CPU 温度：原始 counts（0.1°C/count）-> 滑动平均 -> 阈值判断
+[[pipeline]]
+sensor_id = "pcba-01.cpu_temp"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 0.1
+offset = 0
+unit = "°C"
+
+[[pipeline.stages]]
+type = "sliding_average"
+window = 5
+
+[[pipeline.stages]]
+type = "threshold"
+low_warning = 10
+high_warning = 30
+low_critical = 5
+high_critical = 35
+
+# 风扇转速：直接展示，单位 RPM
+[[pipeline]]
+sensor_id = "pcba-01.fan_speed"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+unit = "RPM"
+
+# vcore：原始已是浮点电压
+[[pipeline]]
+sensor_id = "pcba-01.vcore"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+unit = "V"
+
+# 输入电压：mV -> V
+[[pipeline]]
+sensor_id = "pcba-01.vin"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 0.001
+unit = "V"
+
+# 输入电流：mA -> A，并做统计聚合（窗口 4 的均值）
+[[pipeline]]
+sensor_id = "pcba-01.iin"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 0.001
+unit = "A"
+
+[[pipeline.stages]]
+type = "aggregate"
+window = 4
+mode = "avg"
+
+# 数学表达式示例（注释掉，避免与滑动平均冲突）：
+# [[pipeline]]
+# sensor_id = "pcba-01.uptime_ticks"
+# [[pipeline.stages]]
+# type = "math"
+# expression = "v % 60"

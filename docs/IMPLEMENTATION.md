@@ -1,0 +1,185 @@
+# Telmux-rs 分步实现计划
+
+> PCBA 板载传感器遥测多路网关（Rust）。采集层（Modbus）→ 处理管道 → 内存指标存储 → Redfish / SNMP / Modbus 三协议出口。
+
+本文档把 README 的目标拆解为可独立验证的里程碑，并记录当前实现进度。
+
+## 总体架构（来自 README）
+
+```
+[PCBA Sensors]
+       ↓（原始 raw 数据读取）
+┌─────────────────────┐
+│  Acquisition Layer  │ 传感器抽象采集层，统一封装各类硬件读取接口
+└──────────┬──────────┘
+           ↓
+┌─────────────────────┐
+│ Processing Pipeline │ 滤波、换算、计算、统计、阈值判断
+└──────────┬──────────┘
+           ↓
+┌─────────────────────┐
+│    Metric Store     │ 处理后指标内存存储
+└──────────┬──────────┘
+           ↓
+     ┌─────┴─────┬────────┐
+     ▼           ▼        ▼
+Redfish       SNMP     Modbus
+(HTTP)       (UDP)   (TCP/RTU)
+```
+
+## 分层约定（重要设计决策）
+
+- **采集层只负责"读原始寄存器并解码"**：寄存器解码为数值（u16/i16/u32/i32/f32、字节序处理），**不做单位换算**。
+- **单位换算、滤波、计算、阈值判断全部属于处理管道（阶段 3）**，配置在 `[[pipeline]]`，与 README 架构图一致。
+- 各层之间通过明确的类型与 channel 通信：采集层输出 `RawSample`，管道输出 `Metric`，存储层按 `SensorId` 索引。
+
+---
+
+## 阶段 0 — 工程骨架 ✅（已完成）
+
+- Rust edition 2024，`telemux` 包（lib + bin 双目标），release 优化（LTO、codegen-units=1、strip）。
+- 模块布局：`config / domain / acquisition / logging / mock` + `main.rs`。
+- 依赖：`tokio`、`tokio-modbus`（TCP+RTU 客户端/服务端）、`tokio-serial`、`serde`+`toml`、
+  `tracing`+`tracing-subscriber`、`anyhow`/`thiserror`、`clap`、`async-trait`。
+- **网络说明（已解决）**：早期受限沙箱（workspace-write）下 HTTPS 被禁（schannel 报
+  `SEC_E_NO_CREDENTIALS`），crates.io 不可达，曾以离线缓存 + 手写 Modbus 协议层替代。
+  根因是沙箱受限令牌无法访问证书库，**并非网络或代理问题**——以完整沙箱权限
+  （danger-full-access）运行 cargo 即可正常联网（已实测 `cargo add`/`fetch`/`build` 通过）。
+  网络恢复后已换回正式依赖：`tokio-modbus 0.17`、`tokio-serial 5.5`、`tracing-subscriber`、
+  `async-trait`；手写协议层（`src/acquisition/modbus.rs`）已删除。
+- **验收**：`cargo run` 启动、结构化日志、Ctrl+C 优雅退出。
+
+## 阶段 1 — 领域模型 + 配置驱动 ✅（已完成）
+
+| 步骤 | 内容 |
+|---|---|
+| 1.1 | 核心类型：`SensorId`、`RawSample`（原始寄存器值）、`Metric`（标准化指标）、`MetricStatus` |
+| 1.2 | TOML 配置 schema：`[general]`、`[[devices]]`（TCP/RTU、从站地址、轮询间隔）、`[[devices.registers]]`（功能码、地址、长度、数值类型、字序） |
+| 1.3 | serde 反序列化 + 自定义校验（sensor_id 全局唯一、寄存器地址冲突、transport 必填字段、unit_id 范围） |
+
+**验收**：坏配置报错定位到具体字段；`config/example.toml` 可加载。
+**说明**：`[[pipeline]]`、`[endpoints]`、`[[alerts]]` 配置段留待阶段 3/5 加入，当前解析器忽略未知字段以保证前向兼容。
+
+## 阶段 2 — 采集层（Acquisition Layer）✅（已完成）
+
+| 步骤 | 内容 |
+|---|---|
+| 2.1 | `SensorSource` trait（`#[async_trait]`）：`read_samples() -> Vec<RawSample>`，统一封装硬件读取接口 |
+| 2.2 | `ModbusTcpSource` / `ModbusRtuSource`（基于 `tokio-modbus` 0.17）：读保持/输入寄存器、超时、断线重连 |
+| 2.3 | RTU 串口传输基于 `tokio-serial`（`open_native_async`），另提供 `from_stream` 支持内存流/RTU-over-TCP |
+| 2.4 | 寄存器解码（纯函数，可单测）：u16/i16/u32/i32/f32，字序 big/little |
+| 2.5 | 轮询调度器：每设备一个 tokio 任务，`interval` 驱动，失败指数退避，输出进 `mpsc` channel |
+| 2.6 | Mock PCBA 从站（`examples/mock_pcba.rs`，基于 `tokio-modbus` server）+ TCP/RTU 集成测试 |
+
+**验收**：`cargo test` 通过（含对接模拟从站的 TCP 集成测试、内存流上的 RTU 帧测试）；
+`cargo run` 持续输出采样日志。
+**说明**：RTU 真实串口路径依赖硬件，自动化测试覆盖 RTU 帧协议（duplex + CRC16 校验），
+串口打开路径为编译级覆盖。
+
+## Dev Dashboard（开发调试面板）✅（三期完成）
+
+独立于主线阶段的功能（详见 `docs/DEV_DASHBOARD.md`）：
+
+- 本地 Web 面板（`127.0.0.1:8080`）：表格展示寄存器配置 + 原始值 + 计算指标（状态着色），WebSocket 实时刷新（~1Hz 快照）
+- **公式可视化**：每行可点击展开计算链路（`describe_stage`/`describe_pipeline` 自动生成，如 `v = v × 0.1 → °C → avg(最近 5 个值) → 状态: <5 critical / ...`）
+- **动态创建寄存器**（第三期）：`POST /api/registers` 热添加 —— 服务端权威校验（sensor_id 唯一 / 地址重叠 / pipeline 合法）→ 写回 TOML → ≤1 个 poll 周期自动生效（无需重启）；前端表单 + 错误展示
+- **开发/生产隔离**：`cfg(any(debug_assertions, feature = "dev-dashboard"))`
+  - `ConfigHandle`（`src/config_handle.rs`）：dev 构建内部 `Arc<RwLock<Config>>` 可热更新；**release 构建内部 `Arc<Config>` 纯只读，`update()`/`save()` 编译期不存在**（已验证 release 二进制无任何 dashboard/动态配置痕迹）
+  - 采集层 `SensorSource::read_samples(registers)` 每轮从 ConfigHandle 热读寄存器列表；`PipelinesCache` 按配置 revision 重建
+- 依赖 axum/serde_json/futures-util 常驻（cargo 无法按 profile 启用 optional 依赖；axum 亦为阶段 5 Redfish 所需）
+
+## 阶段 3 — 处理管道（Processing Pipeline）✅（已完成）
+
+| 步骤 | 内容 |
+|---|---|
+| 3.1 | `Stage` trait（`process(&mut SampleContext)`）+ `Pipeline`（按序执行，`RawSample → Metric`）。注意：Stage 刻意不要求 `Send`（meval 表达式内部持 `Rc`），管道在主线程 consumer 中单线程运行 |
+| 3.2 | 内置阶段（`src/pipeline/stages.rs`）：`scale`（线性换算+改单位）、`sliding_average`/`median`（滑动滤波）、`math`（meval 表达式，变量 `v`）、`threshold`（Normal/Warning/Critical，critical 优先）、`aggregate`（窗口 min/max/avg） |
+| 3.3 | 错误降级：管道失败仅记 warn 日志并跳过该 sensor 的 metric 更新（store 保留上一次值），不影响其他传感器 |
+| 3.4 | `[[pipeline]]` 配置段（`StageConfig` 枚举，`type` 标签驱动）+ 校验（sensor_id 必须存在且唯一、窗口范围、阈值边界、表达式可解析） |
+
+**验收**：各 stage 单测 + 管道集成测试通过；`config/example.toml` 演示 5 条管道（换算/滤波/阈值/聚合）。
+**已知坑**：TOML 键 `[[pipeline]]`（单数）与 Rust 字段 `pipelines` 不匹配会导致静默为空 —— 已用 `#[serde(rename = "pipeline")]` 修复并补测试。
+
+## 阶段 4 — 指标存储（Metric Store）✅（已完成）
+
+| 步骤 | 内容 |
+|---|---|
+| 4.1 | `MetricStore`（`src/store.rs`）：`RwLock<HashMap<SensorId, SensorState>>`，`SensorState` 同时保留**最近 RawSample + 最近 Metric**（dashboard 面板约束） |
+| 4.2 | 快照 API（`snapshot()`/`get()`，供协议层读取）+ 变更通知（`watch` revision 通道，供告警/Trap 订阅） |
+| 4.3 | 采集 consumer 重构：`update_batch_raw` → 逐 sensor 跑 pipeline → `update_metric`（主线程 select 循环，替代 tokio::spawn —— 管道非 Send） |
+
+**验收**：并发读写单测通过；dashboard 快照展示 raw + metric 双列。
+**Dev Dashboard 第二期**：`snapshot.rs` 已从 `MetricStore` 读取并填充 `metric` 字段（含状态着色数据），
+前端无需改动 —— 见 `docs/DEV_DASHBOARD.md`。
+
+## 阶段 5 — 输出协议（三选并行，可逐个交付）⏳（未开始）
+
+**5.1 Redfish（HTTP，axum）**
+- 资源树：`/redfish/v1` → `/Chassis/{id}/Thermal`、`/Power`、`/Sensors/{id}`，按 Redfish Schema 风格返回 JSON。
+- 从 Metric Store 实时取数，配置驱动资源映射。
+
+**5.2 Modbus Server（tokio-modbus server）**
+- 同时起 TCP 从站（可另配 RTU 串口从站）。
+- 配置驱动寄存器映射表：`metric → 保持/输入寄存器 + 地址 + 缩放`。
+
+**5.3 SNMP（生态最不成熟，先做 spike）**
+- 优先尝试 `snmp_rust_agent` 或 `async-snmp`（tokio 原生 agent）。
+- 不适用则自实现最小 SNMPv1/v2c agent（UDP + BER 编解码，GET/GETNEXT/GETBULK），OID 映射配置驱动。
+- Trap 告警为可选后续项。
+
+**验收**：`curl` Redfish、`mbpoll` 读 Modbus 从站、`snmpwalk` 遍历 OID，数值与模拟 PCBA 一致。
+
+## 阶段 6 — 可观测性与运维 ⏳（未开始）
+
+| 步骤 | 内容 |
+|---|---|
+| 6.1 | tracing 结构化日志 + 滚动文件日志（debug/告警分级） |
+| 6.2 | 优雅停机完善：SIGINT/SIGTERM → 停止轮询 → 关闭监听 → 刷日志 |
+| 6.3 | 守护进程：Windows Service（`windows-service`）/ Linux systemd unit |
+| 6.4 | 健康/状态端点（进程存活、设备连接状态、协议监听状态） |
+
+## 阶段 7 — 测试与验证 ⏳（未开始）
+
+- 单元测试：config 解析、管道阶段、寄存器/OID 映射。
+- 集成测试：模拟 PCBA → 网关 → 三协议查询全链路数值一致。
+- 稳定性：长时间运行 + 断线重连演练；内存占用验证（贴合"低资源开销"目标）。
+
+## 阶段 8 — 打包发布 ⏳（未开始）
+
+- Release 构建优化（体积/内存）、Windows 与 Linux 双平台打包。
+- 交付示例配置、MIB 文件、systemd/service 安装脚本、使用文档。
+
+---
+
+## 关键依赖速查
+
+| 用途 | crate |
+|---|---|
+| 异步运行时 | `tokio` |
+| Modbus 客户端/服务端 | `tokio-modbus` 0.17（TCP + RTU，含 server 骨架用于 mock） |
+| RTU 串口 | `tokio-serial` 5.5 |
+| Redfish HTTP | `axum` + `serde_json`（阶段 5） |
+| SNMP agent | `snmp_rust_agent` / `async-snmp`（阶段 5，备选自实现） |
+| 配置 | `serde` + `toml` |
+| 日志 | `tracing` + `tracing-subscriber`（env-filter + tracing-log 桥接） |
+| 表达式计算 | `fasteval` / `meval`（阶段 3） |
+| CLI | `clap` |
+
+## 主要风险点
+
+1. **SNMP 是最大不确定性**——Rust 生态 agent 库较新，阶段 5 前先做最小 spike。
+2. **RTU 串口**在 Windows 有权限/兼容差异，先 TCP 后 RTU。
+3. **Redfish 范围要克制**——按"只读传感器资源"最小子集实现，不追求完整规范。
+
+## 进度
+
+- [x] 阶段 0 工程骨架
+- [x] 阶段 1 领域模型 + 配置
+- [x] 阶段 2 采集层
+- [x] 阶段 3 处理管道
+- [x] 阶段 4 指标存储
+- [ ] 阶段 5 输出协议
+- [ ] 阶段 6 可观测性与运维
+- [ ] 阶段 7 测试与验证
+- [ ] 阶段 8 打包发布
+- [x] Dev Dashboard（两期均完成）

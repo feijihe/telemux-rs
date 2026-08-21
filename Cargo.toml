@@ -1,0 +1,53 @@
+[package]
+name = "telemux"
+version = "0.1.0"
+edition = "2024"
+description = "PCBA telemetry multi-protocol gateway: Modbus acquisition, Redfish/SNMP/Modbus exposure"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+tokio = { version = "1.48", features = ["rt", "macros", "signal", "time", "net", "io-util", "sync"] }
+tokio-modbus = { version = "0.17", features = ["rtu", "server", "tcp-server"] }
+tokio-serial = "5.5"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log"] }
+anyhow = "1.0"
+thiserror = "2.0"
+clap = { version = "4.5", features = ["derive"] }
+async-trait = "0.1"
+# Dev dashboard 依赖（axum/serde_json/futures-util）。常驻依赖而非 optional：
+# 开发面板模块本身由 cfg(any(debug_assertions, feature = "dev-dashboard")) 门控，
+# 但 cargo 无法按 profile 启用 optional 依赖，故依赖常驻、模块编译期排除。
+# axum 亦为阶段 5（Redfish）所需。release 产物不含面板代码（LTO 会剔除未用部分）。
+axum = { version = "0.8.9", features = ["ws", "tokio"] }
+serde_json = "1.0.151"
+futures-util = "0.3.34"
+meval = "0.2.0"
+
+# 说明：早期受限沙箱下 crates.io 不可达时曾手写 Modbus 协议层（src/acquisition/modbus.rs 已删除）
+# 与自写 logger；网络恢复（以完整沙箱权限运行 cargo）后已换回正式依赖：
+#   - Modbus 客户端/服务端  -> tokio-modbus 0.17（TCP + RTU）
+#   - RTU 串口             -> tokio-serial 5.5
+#   - 日志                 -> tracing + tracing-subscriber
+#   - async trait          -> async-trait
+
+[dev-dependencies]
+crc = "3.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+
+[features]
+default = []
+# 开发调试面板（Web + WebSocket）。模块由 cfg(any(debug_assertions, feature = "dev-dashboard"))
+# 门控：debug 构建自动启用；release 默认排除；如需在 release 下临时启用排查问题，
+# 用 `cargo build --release --features dev-dashboard`。
+dev-dashboard = []
