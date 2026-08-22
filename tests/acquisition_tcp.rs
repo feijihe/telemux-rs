@@ -1,4 +1,9 @@
 //! Integration tests: Modbus-TCP acquisition against the in-process mock PCBA.
+//!
+//! The mock PCBA only exists in dev builds (see `src/mock.rs`), so this file
+//! is skipped in release test runs.
+
+#![cfg(any(debug_assertions, feature = "dev-dashboard"))]
 
 use std::collections::HashMap;
 use std::time::Duration;

@@ -3,9 +3,14 @@
 //! Usage: `cargo run --example mock_pcba [port]` (default port 1502).
 //! Serves the register map that `config/example.toml` expects, with dynamic
 //! values that change on every read so you can watch the gateway log live data.
+//!
+//! The mock only exists in dev builds (see `src/mock.rs`); in release builds
+//! this example compiles to a stub that explains the limitation.
 
+#[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 use telemux::mock::MockPcba;
 
+#[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     let port = std::env::args()
@@ -26,4 +31,13 @@ async fn main() -> anyhow::Result<()> {
     drop(handle);
     println!("mock PCBA stopped");
     Ok(())
+}
+
+#[cfg(not(any(debug_assertions, feature = "dev-dashboard")))]
+fn main() {
+    eprintln!(
+        "mock_pcba example is only available in dev builds \
+         (debug_assertions or --features dev-dashboard)"
+    );
+    std::process::exit(1);
 }

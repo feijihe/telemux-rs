@@ -113,7 +113,9 @@ impl ConfigHandle {
     }
 }
 
-#[cfg(test)]
+// 热更新/持久化是开发构建功能；release test（debug_assertions=false）下
+// update/save 不存在，这些测试一并跳过。
+#[cfg(all(test, any(debug_assertions, feature = "dev-dashboard")))]
 mod tests {
     use super::*;
     use crate::config::{DeviceConfig, RegisterConfig, RegisterFunction, ValueType, WordOrder};

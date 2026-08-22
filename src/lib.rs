@@ -7,7 +7,8 @@
 //! - [`store`]: latest-value raw sample store
 //! - [`logging`]: tracing + tracing-subscriber setup
 //! - [`dashboard`]: dev-only web dashboard (compile-time gated, see Cargo.toml)
-//! - [`mock`]: mock PCBA Modbus slave for development and tests
+//! - [`mock`]: mock PCBA Modbus slave (dev-only, compile-time gated — used by
+//!   tests and the `mock_pcba` example, excluded from release builds)
 
 pub mod acquisition;
 pub mod config;
@@ -16,6 +17,8 @@ pub mod config_handle;
 pub mod dashboard;
 pub mod domain;
 pub mod logging;
+// Mock PCBA 从站：仅开发构建编译（tests/example 使用），release 生产排除。
+#[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 pub mod mock;
 pub mod pipeline;
 pub mod store;

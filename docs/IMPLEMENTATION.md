@@ -38,7 +38,7 @@ Redfish       SNMP     Modbus
 ## 阶段 0 — 工程骨架 ✅（已完成）
 
 - Rust edition 2024，`telemux` 包（lib + bin 双目标），release 优化（LTO、codegen-units=1、strip）。
-- 模块布局：`config / domain / acquisition / logging / mock` + `main.rs`。
+- 模块布局：`config / domain / acquisition / logging / mock`（mock 仅开发构建编译）+ `main.rs`。
 - 依赖：`tokio`、`tokio-modbus`（TCP+RTU 客户端/服务端）、`tokio-serial`、`serde`+`toml`、
   `tracing`+`tracing-subscriber`、`anyhow`/`thiserror`、`clap`、`async-trait`。
 - **网络说明（已解决）**：早期受限沙箱（workspace-write）下 HTTPS 被禁（schannel 报
@@ -69,7 +69,7 @@ Redfish       SNMP     Modbus
 | 2.3 | RTU 串口传输基于 `tokio-serial`（`open_native_async`），另提供 `from_stream` 支持内存流/RTU-over-TCP |
 | 2.4 | 寄存器解码（纯函数，可单测）：u16/i16/u32/i32/f32，字序 big/little |
 | 2.5 | 轮询调度器：每设备一个 tokio 任务，`interval` 驱动，失败指数退避，输出进 `mpsc` channel |
-| 2.6 | Mock PCBA 从站（`examples/mock_pcba.rs`，基于 `tokio-modbus` server）+ TCP/RTU 集成测试 |
+| 2.6 | Mock PCBA 从站（`src/mock.rs` + `examples/mock_pcba.rs`，基于 `tokio-modbus` server）+ TCP/RTU 集成测试。**仅开发构建编译**（`cfg(any(debug_assertions, feature="dev-dashboard"))`），release 生产排除；相关测试/示例同样门控 |
 
 **验收**：`cargo test` 通过（含对接模拟从站的 TCP 集成测试、内存流上的 RTU 帧测试）；
 `cargo run` 持续输出采样日志。
