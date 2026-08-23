@@ -75,7 +75,7 @@
 
 <!-- ===== 二维系统图 ===== -->
 <h2>CDU 系统图（实时）</h2>
-<div id="sys"><svg id="svg"></svg></div>
+<div id="sys"></div>
 
 <!-- ===== 寄存器表 ===== -->
 <h2>寄存器地图原始值</h2>
@@ -117,9 +117,9 @@ const SENSOR_POS = {
   "cdu.tank.p10":    {x: 690, y: 60,  label: "P10"},
   "cdu.tank.level":  {x: 650, y: 100, label: "LL1"},
   "cdu.tank.ph":     {x: 650, y: 140, label: "PH1"},
-  "cdu.env.temp":    {x: 985, y: 470, label: "环境 T"},
-  "cdu.env.rh":      {x: 985, y: 505, label: "环境 RH"},
-  "cdu.leak":        {x: 985, y: 540, label: "LEAK"},
+  "cdu.env.temp":    {x: 700, y: 470, label: "环境 T"},
+  "cdu.env.rh":      {x: 700, y: 505, label: "环境 RH"},
+  "cdu.leak":        {x: 700, y: 540, label: "LEAK"},
 };
 
 // 温度传感器（冷/热配色），其余灰色
@@ -134,8 +134,10 @@ const KIND_COLOR = {
 };
 
 function buildSvg(data) {
-  const W = 1020, H = 600;
-  let s = `<rect width="${W}" height="${H}" fill="#fbfcfe"/>`;
+  const W = 1020, H = 660;
+  // 完整 SVG 标签（带 viewBox，保证比例正确、高度自适应）
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;display:block">`;
+  s += `<rect width="${W}" height="${H}" fill="#fbfcfe"/>`;
   // 标注
   s += `<text x="30" y="30" class="label" fill="#777">一次侧（冷水回路）</text>`;
   s += `<text x="700" y="30" class="label" fill="#777">二次侧（热水回路）</text>`;
@@ -180,6 +182,7 @@ function buildSvg(data) {
     s += `<text x="${pos.x + 10}" y="${pos.y - 8}" class="sensor-txt" fill="#555">${pos.label}</text>`;
     s += `<text x="${pos.x + 10}" y="${pos.y + 8}" class="sensor-val" fill="${color}">${val} ${unit}</text>`;
   }
+  s += `</svg>`;
   return s;
 }
 
@@ -203,7 +206,7 @@ function fmt(v) { return v === null || v === undefined ? '—' : Number(v).toFix
 
 function render(data) {
   // SVG 图
-  document.getElementById('svg').innerHTML = buildSvg(data);
+  document.getElementById('sys').innerHTML = buildSvg(data);
   // 控制变量输入框回显
   const c = {};
   for (const x of data.controls) c[x.name] = x;
