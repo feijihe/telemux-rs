@@ -4,35 +4,80 @@
 <meta charset="UTF-8">
 <title>Telemux-Sim — CDU 仿真器</title>
 <style>
-  body { font-family: Consolas, "Microsoft YaHei", monospace; margin: 20px; background: #f5f6fa; }
+  body { font-family: Consolas, "Microsoft YaHei", monospace; margin: 16px; background: #f5f6fa; }
   h1 { font-size: 20px; }
-  h2 { font-size: 16px; margin-top: 24px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
-  table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8px; }
-  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 13px; }
+  h2 { font-size: 15px; margin-top: 20px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  .status { font-size: 12px; color: #888; margin-bottom: 10px; }
+  .panel { display: flex; gap: 16px; flex-wrap: wrap; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 10px 14px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; }
+  table { border-collapse: collapse; background: #fff; margin-top: 6px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; font-size: 12px; }
   th { background: #2f3b52; color: #fff; }
   tr:nth-child(even) { background: #f9f9f9; }
-  .addr { color: #888; font-size: 12px; }
+  .addr { color: #888; font-size: 11px; }
   .mono { font-family: Consolas, monospace; }
-  .status { font-size: 12px; color: #888; margin-bottom: 12px; }
-  #controls td:first-child { font-weight: bold; }
+  .ctrl-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .ctrl-row label { width: 130px; font-size: 12px; }
+  .ctrl-row input[type=number] { width: 80px; padding: 3px 6px; font-size: 13px; }
+  .ctrl-row .val { font-size: 13px; color: #0a7; }
+  button { padding: 4px 14px; cursor: pointer; }
+  /* SVG 图 */
+  #sys svg { width: 100%; max-width: 1100px; height: auto; background: #fbfcfe;
+             border: 1px solid #ddd; border-radius: 6px; }
+  .sensor-dot { r: 6; }
+  .sensor-txt { font-size: 11px; font-family: Consolas, monospace; }
+  .sensor-val { font-size: 12px; font-weight: bold; font-family: Consolas, monospace; }
+  .pipe { stroke: #8db4e2; stroke-width: 3; fill: none; }
+  .pipe-hot { stroke: #e08a8a; stroke-width: 3; fill: none; }
+  .pipe-cold { stroke: #7fb3e8; stroke-width: 3; fill: none; }
+  .label { font-size: 12px; fill: #444; }
+  .tank { stroke: #888; stroke-width: 2; fill: #eef; }
 </style>
 </head>
 <body>
 <h1>Telemux-Sim · CDU 仿真器</h1>
 <div class="status" id="status">加载中…</div>
 
-<h2>控制变量（Modbus 保持寄存器，可写）</h2>
-<table id="controls">
-  <thead><tr><th>地址</th><th>名称</th><th>值</th><th>单位</th><th>可写</th></tr></thead>
-  <tbody></tbody>
-</table>
+<!-- ===== 温度设定与控制变量 ===== -->
+<div class="panel">
+  <div class="card">
+    <h3>温度设定（立即生效）</h3>
+    <div class="ctrl-row"><label>一次侧冷水 T1 (°C)</label>
+      <input type="number" id="in_cold" step="0.5" value="12">
+      <button onclick="setControl('primary_cold_temp', 'in_cold')">应用</button>
+      <span class="val" id="v_cold"></span></div>
+    <div class="ctrl-row"><label>二次侧热水 T5 (°C)</label>
+      <input type="number" id="in_hot" step="0.5" value="45">
+      <button onclick="setControl('secondary_hot_temp', 'in_hot')">应用</button>
+      <span class="val" id="v_hot"></span></div>
+  </div>
+  <div class="card">
+    <h3>运行控制</h3>
+    <div class="ctrl-row"><label>Pump1 duty (%)</label>
+      <input type="number" id="in_p1" step="1" value="50">
+      <button onclick="setControl('pump1_duty', 'in_p1')">应用</button>
+      <span class="val" id="v_p1"></span></div>
+    <div class="ctrl-row"><label>Pump2 duty (%)</label>
+      <input type="number" id="in_p2" step="1" value="40">
+      <button onclick="setControl('pump2_duty', 'in_p2')">应用</button>
+      <span class="val" id="v_p2"></span></div>
+    <div class="ctrl-row"><label>Valve1 duty (%)</label>
+      <input type="number" id="in_v1" step="1" value="30">
+      <button onclick="setControl('valve1_duty', 'in_v1')">应用</button>
+      <span class="val" id="v_v1"></span></div>
+    <div class="ctrl-row"><label>Fan duty (%)</label>
+      <input type="number" id="in_fan" step="1" value="60">
+      <button onclick="setControl('fan_duty', 'in_fan')">应用</button>
+      <span class="val" id="v_fan"></span></div>
+  </div>
+</div>
 
-<h2>传感器（Modbus 输入寄存器，f32 双字）</h2>
-<table id="sensors">
-  <thead><tr><th>sensor_id</th><th>名称</th><th>类型</th><th>值</th><th>单位</th><th>公式</th></tr></thead>
-  <tbody></tbody>
-</table>
+<!-- ===== 二维系统图 ===== -->
+<h2>CDU 系统图（实时）</h2>
+<div id="sys"><svg id="svg"></svg></div>
 
+<!-- ===== 寄存器表 ===== -->
 <h2>寄存器地图原始值</h2>
 <table id="raw">
   <thead><tr><th>区域</th><th>地址</th><th>槽位</th><th>原始值</th><th>解码</th></tr></thead>
@@ -41,41 +86,159 @@
 
 <script>
 const REFRESH_MS = 1000;
+let current = null;   // 最近一次 /api/state
+
+// ---- 传感器在系统图上的位置（x, y）与标签 ----
+const SENSOR_POS = {
+  "cdu.pri.p1":   {x: 90,  y: 90,  label: "P1"},
+  "cdu.pri.p2":   {x: 90,  y: 140, label: "P2"},
+  "cdu.pri.t1":   {x: 170, y: 90,  label: "T1"},
+  "cdu.pri.t2":   {x: 170, y: 140, label: "T2"},
+  "cdu.pri.f1":   {x: 250, y: 115, label: "F1"},
+  "cdu.pri.t3":   {x: 170, y: 340, label: "T3"},
+  "cdu.pri.t4":   {x: 170, y: 390, label: "T4"},
+  "cdu.pri.p3":   {x: 90,  y: 340, label: "P3"},
+  "cdu.pri.p4":   {x: 90,  y: 390, label: "P4"},
+  "cdu.pri.l1":   {x: 40,  y: 240, label: "L1"},
+  "cdu.sec.f2":   {x: 750, y: 115, label: "F2"},
+  "cdu.sec.p5":   {x: 830, y: 90,  label: "P5"},
+  "cdu.sec.p6":   {x: 830, y: 140, label: "P6"},
+  "cdu.sec.t5":   {x: 910, y: 90,  label: "T5"},
+  "cdu.sec.t6":   {x: 910, y: 140, label: "T6"},
+  "cdu.sec.t7":   {x: 910, y: 340, label: "T7"},
+  "cdu.sec.t8":   {x: 910, y: 390, label: "T8"},
+  "cdu.sec.p7":   {x: 830, y: 340, label: "P7"},
+  "cdu.sec.p8":   {x: 830, y: 390, label: "P8"},
+  "cdu.pump1.in_p":  {x: 610, y: 200, label: "Pump1 进"},
+  "cdu.pump1.out_p": {x: 610, y: 260, label: "Pump1 出"},
+  "cdu.pump2.in_p":  {x: 690, y: 200, label: "Pump2 进"},
+  "cdu.pump2.out_p": {x: 690, y: 260, label: "Pump2 出"},
+  "cdu.tank.p9":     {x: 610, y: 60,  label: "P9"},
+  "cdu.tank.p10":    {x: 690, y: 60,  label: "P10"},
+  "cdu.tank.level":  {x: 650, y: 100, label: "LL1"},
+  "cdu.tank.ph":     {x: 650, y: 140, label: "PH1"},
+  "cdu.env.temp":    {x: 985, y: 470, label: "环境 T"},
+  "cdu.env.rh":      {x: 985, y: 505, label: "环境 RH"},
+  "cdu.leak":        {x: 985, y: 540, label: "LEAK"},
+};
+
+// 温度传感器（冷/热配色），其余灰色
+const KIND_COLOR = {
+  temperature: "#e0850f",
+  pressure: "#3377cc",
+  flow: "#2f9e44",
+  level: "#7048e8",
+  ph: "#c2255c",
+  leak: "#e03131",
+  humidity: "#1098ad",
+};
+
+function buildSvg(data) {
+  const W = 1020, H = 600;
+  let s = `<rect width="${W}" height="${H}" fill="#fbfcfe"/>`;
+  // 标注
+  s += `<text x="30" y="30" class="label" fill="#777">一次侧（冷水回路）</text>`;
+  s += `<text x="700" y="30" class="label" fill="#777">二次侧（热水回路）</text>`;
+  // 管路
+  // 一次侧：冷水进 (30,115)→PHEX左；热水出 PHEX左→回水(30,365)
+  s += `<path class="pipe-cold" d="M30 115 H310 V115"/>`;
+  s += `<path class="pipe-hot"  d="M30 365 H310 V365"/>`;
+  // 二次侧：服务器回水(990,115)→PHEX右；供水 PHEX右→服务器(990,365)
+  s += `<path class="pipe-hot"  d="M990 115 H710 V115"/>`;
+  s += `<path class="pipe-cold" d="M990 365 H710 V365"/>`;
+  // PHEX 板换（居中）
+  s += `<rect x="330" y="90" width="120" height="300" rx="8" fill="#dff0d8" stroke="#5b8c5a" stroke-width="2"/>`;
+  s += `<text x="390" y="235" text-anchor="middle" class="label" fill="#5b8c5a">PHEX</text>`;
+  s += `<text x="390" y="252" text-anchor="middle" class="label" fill="#5b8c5a" font-size="10">板式换热器</text>`;
+  // 二次侧水箱 + 泵（右上）
+  s += `<rect x="580" y="40" width="180" height="150" rx="8" class="tank"/>`;
+  s += `<text x="670" y="70" text-anchor="middle" class="label">膨胀水箱</text>`;
+  s += `<rect x="590" y="190" width="60" height="90" rx="4" fill="#e7f5ff" stroke="#4dabf7"/>`;
+  s += `<text x="620" y="240" text-anchor="middle" class="label" fill="#4dabf7">泵1</text>`;
+  s += `<rect x="680" y="190" width="60" height="90" rx="4" fill="#e7f5ff" stroke="#4dabf7"/>`;
+  s += `<text x="710" y="240" text-anchor="middle" class="label" fill="#4dabf7">泵2</text>`;
+  // 二次侧竖管（水箱↔服务器回路）
+  s += `<path class="pipe" d="M470 115 H580 V240 H590"/>`;
+  s += `<path class="pipe" d="M470 365 H580 V320 H590"/>`;
+  s += `<path class="pipe" d="M740 320 V240 H710"/>`;
+  // 服务器标识（右侧）
+  s += `<rect x="990" y="60" width="24" height="360" rx="4" fill="#eee" stroke="#999"/>`;
+  s += `<text x="1002" y="240" class="label" fill="#666" font-size="10" transform="rotate(90 1002 240)">SERVER</text>`;
+  // 一次侧 H1 比例阀
+  s += `<polygon points="300,105 320,115 300,125" fill="#f59f00"/>`;
+  s += `<text x="332" y="122" class="label" fill="#e8590c" font-size="10">H1</text>`;
+
+  // 传感器标点
+  const values = new Map(data.sensors.map(s => [s.sensor_id, s]));
+  for (const [id, pos] of Object.entries(SENSOR_POS)) {
+    const sv = values.get(id);
+    const kind = sv ? sv.kind : 'other';
+    const color = KIND_COLOR[kind] || '#888';
+    const val = sv && sv.value !== null ? Number(sv.value).toFixed(1) : '—';
+    const unit = sv && sv.unit ? sv.unit : '';
+    s += `<circle cx="${pos.x}" cy="${pos.y}" r="7" fill="${color}" stroke="#fff" stroke-width="1.5" class="sensor-dot"/>`;
+    s += `<text x="${pos.x + 10}" y="${pos.y - 8}" class="sensor-txt" fill="#555">${pos.label}</text>`;
+    s += `<text x="${pos.x + 10}" y="${pos.y + 8}" class="sensor-val" fill="${color}">${val} ${unit}</text>`;
+  }
+  return s;
+}
+
+async function setControl(name, inputId) {
+  const input = document.getElementById(inputId);
+  const value = parseFloat(input.value);
+  if (isNaN(value)) return;
+  try {
+    const res = await fetch('/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, value }),
+    });
+    const j = await res.json();
+    if (!j.ok) alert(`设置失败: ${j.error}`);
+    else refresh();  // 立即刷新，温度全系统联动
+  } catch (e) { alert(`请求失败: ${e}`); }
+}
+
+function fmt(v) { return v === null || v === undefined ? '—' : Number(v).toFixed(2); }
+
+function render(data) {
+  // SVG 图
+  document.getElementById('svg').innerHTML = buildSvg(data);
+  // 控制变量输入框回显
+  const c = {};
+  for (const x of data.controls) c[x.name] = x;
+  if (c.primary_cold_temp) { document.getElementById('in_cold').value = c.primary_cold_temp.value; document.getElementById('v_cold').textContent = c.primary_cold_temp.value + ' °C'; }
+  if (c.secondary_hot_temp) { document.getElementById('in_hot').value = c.secondary_hot_temp.value; document.getElementById('v_hot').textContent = c.secondary_hot_temp.value + ' °C'; }
+  if (c.pump1_duty) { document.getElementById('in_p1').value = c.pump1_duty.value; document.getElementById('v_p1').textContent = c.pump1_duty.value + ' %'; }
+  if (c.pump2_duty) { document.getElementById('in_p2').value = c.pump2_duty.value; document.getElementById('v_p2').textContent = c.pump2_duty.value + ' %'; }
+  if (c.valve1_duty) { document.getElementById('in_v1').value = c.valve1_duty.value; document.getElementById('v_v1').textContent = c.valve1_duty.value + ' %'; }
+  if (c.fan_duty) { document.getElementById('in_fan').value = c.fan_duty.value; document.getElementById('v_fan').textContent = c.fan_duty.value + ' %'; }
+
+  // 寄存器原始值表
+  const rtbody = document.querySelector('#raw tbody');
+  const rows = [];
+  for (const h of data.holding) {
+    rows.push(`<tr><td>保持</td><td class="addr">0x${h.addr.toString(16).padStart(4,'0')}</td>` +
+      `<td>${h.slot ? h.slot.control : '空'}</td><td class="mono">${h.raw}</td>` +
+      `<td>${h.slot ? (h.slot.writable ? '可写 u16' : '只读 u16') : '—'}</td></tr>`);
+  }
+  for (const inp of data.inputs) {
+    rows.push(`<tr><td>输入</td><td class="addr">0x${inp.addr.toString(16).padStart(4,'0')}</td>` +
+      `<td>${inp.sensor ?? '空'}</td>` +
+      `<td class="mono">${inp.raw_hi} ${inp.raw_lo}</td>` +
+      `<td class="mono">${Number(inp.value_f32).toFixed(3)}</td></tr>`);
+  }
+  rtbody.innerHTML = rows.join('');
+
+  document.getElementById('status').textContent =
+    `已刷新 ${new Date().toLocaleTimeString()} · ${data.controls.length} 控制变量 · ${data.sensors.length} 传感器`;
+}
 
 async function refresh() {
   try {
     const res = await fetch('/api/state');
-    const data = await res.json();
-
-    const ctbody = document.querySelector('#controls tbody');
-    ctbody.innerHTML = data.controls.map((c, i) =>
-      `<tr><td class="addr">0x${i.toString(16).padStart(4,'0')}</td><td>${c.name}</td>` +
-      `<td class="mono">${Number(c.value).toFixed(1)}</td><td>${c.unit ?? ''}</td>` +
-      `<td>${c.writable ? '✓' : '—'}</td></tr>`).join('');
-
-    const stbody = document.querySelector('#sensors tbody');
-    stbody.innerHTML = data.sensors.map(s =>
-      `<tr><td>${s.sensor_id}</td><td>${s.name}</td><td>${s.kind}</td>` +
-      `<td class="mono">${s.value === null ? '—' : Number(s.value).toFixed(3)}</td>` +
-      `<td>${s.unit ?? ''}</td><td>${s.formula}</td></tr>`).join('');
-
-    const rtbody = document.querySelector('#raw tbody');
-    const rows = [];
-    for (const h of data.holding) {
-      rows.push(`<tr><td>保持</td><td class="addr">0x${h.addr.toString(16).padStart(4,'0')}</td>` +
-        `<td>${h.slot ? h.slot.control : '空'}</td><td class="mono">${h.raw}</td>` +
-        `<td>${h.slot ? (h.slot.writable ? '可写 u16' : '只读 u16') : '—'}</td></tr>`);
-    }
-    for (const inp of data.inputs) {
-      rows.push(`<tr><td>输入</td><td class="addr">0x${inp.addr.toString(16).padStart(4,'0')}</td>` +
-        `<td>${inp.sensor ?? '空'}</td>` +
-        `<td class="mono">${inp.raw_hi} ${inp.raw_lo}</td>` +
-        `<td class="mono">${Number(inp.value_f32).toFixed(3)}</td></tr>`);
-    }
-    rtbody.innerHTML = rows.join('');
-
-    document.getElementById('status').textContent =
-      `已刷新 ${new Date().toLocaleTimeString()} · ${data.controls.length} 控制变量 · ${data.sensors.length} 传感器`;
+    current = await res.json();
+    render(current);
   } catch (e) {
     document.getElementById('status').textContent = `刷新失败: ${e}`;
   }

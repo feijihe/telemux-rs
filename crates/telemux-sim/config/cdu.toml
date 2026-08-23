@@ -36,6 +36,19 @@ initial = 60
 unit = "%"
 writable = true
 
+# ---- 温度设定（网页 UI 可调，立即驱动全系统温度联动）----
+[[sim.controls]]
+name = "primary_cold_temp"   # 一次侧冷水供水温度 °C
+initial = 12
+unit = "°C"
+writable = true
+
+[[sim.controls]]
+name = "secondary_hot_temp"  # 二次侧热水回水温度（服务器出水）°C
+initial = 45
+unit = "°C"
+writable = true
+
 # ---- 一次侧（冷水回路）物理传感器 ----
 [[sim.sensors]]
 sensor_id = "cdu.pri.p1"
@@ -58,7 +71,7 @@ sensor_id = "cdu.pri.t1"
 name = "Primary Inlet T1 (cold)"
 kind = "temperature"
 unit = "°C"
-formula = "12 + 0.5 * sin(t)"                # 冷水供水 ~12°C，缓慢波动
+formula = "primary_cold_temp + 0.5 * sin(t)"   # 冷水供水温度（网页可设），缓慢波动
 
 [[sim.sensors]]
 sensor_id = "cdu.pri.t2"
@@ -150,7 +163,7 @@ sensor_id = "cdu.sec.t5"
 name = "From Server T5 (hot return)"
 kind = "temperature"
 unit = "°C"
-formula = "42 + 6 * (1 - fan_duty / 100)"    # 风扇越强，回水温度越低
+formula = "secondary_hot_temp - 3 * (1 - fan_duty / 100)"  # 热水回水（网页可设），风扇越强越接近
 
 [[sim.sensors]]
 sensor_id = "cdu.sec.t6"
