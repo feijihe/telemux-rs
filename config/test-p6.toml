@@ -1,5 +1,8 @@
+# 阶段 6 验证配置：滚动文件日志 + 健康端点（基于 test-p5 寄存器集）
 [general]
-log_level = "info"
+log_level = "debug"
+log_dir = "logs"
+log_max_files = 3
 
 [[devices]]
 name = "pcba-01"
@@ -83,16 +86,6 @@ word_order = "big"
 unit = "enable"
 access = "read_write"
 
-[[devices.registers]]
-name = "new_flow"
-sensor_id = "pcba-01.flow"
-function = "input"
-address = 9
-value_type = "u16"
-word_order = "big"
-unit = "L/min"
-access = "read"
-
 [[pipeline]]
 sensor_id = "pcba-01.fan1_duty"
 
@@ -103,24 +96,6 @@ offset = 0.0
 unit = "%"
 
 [[pipeline]]
-sensor_id = "pcba-01.fan1_speed"
-
-[[pipeline.stages]]
-type = "scale"
-scale = 1.0
-offset = 0.0
-unit = "RPM"
-
-[[pipeline]]
-sensor_id = "pcba-01.vcore"
-
-[[pipeline.stages]]
-type = "scale"
-scale = 1.0
-offset = 0.0
-unit = "V"
-
-[[pipeline]]
 sensor_id = "pcba-01.vin"
 
 [[pipeline.stages]]
@@ -128,25 +103,6 @@ type = "scale"
 scale = 0.001
 offset = 0.0
 unit = "V"
-
-[[pipeline]]
-sensor_id = "pcba-01.iin"
-
-[[pipeline.stages]]
-type = "scale"
-scale = 0.001
-offset = 0.0
-unit = "A"
-
-[[computed]]
-sensor_id = "pcba-01.ratio"
-name = "vin_vcore_ratio"
-unit = "ratio"
-expression = "a / b"
-
-[computed.inputs]
-a = "pcba-01.vin"
-b = "pcba-01.vcore"
 
 [endpoints]
 redfish_enabled = true

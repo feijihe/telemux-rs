@@ -12,7 +12,9 @@ tokio-serial = "5.5"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "tracing-log", "registry"] }
+# 滚动文件日志（阶段 6）：按日轮转 + 保留最近 N 个文件
+tracing-appender = "0.2"
 anyhow = "1.0"
 thiserror = "2.0"
 clap = { version = "4.5", features = ["derive"] }
@@ -26,6 +28,10 @@ serde_json = "1.0.151"
 futures-util = "0.3.34"
 meval = "0.2.0"
 
+# Windows Service（阶段 6.3）：仅 Windows 平台编译
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+
 # 说明：早期受限沙箱下 crates.io 不可达时曾手写 Modbus 协议层（src/acquisition/modbus.rs 已删除）
 # 与自写 logger；网络恢复（以完整沙箱权限运行 cargo）后已换回正式依赖：
 #   - Modbus 客户端/服务端  -> tokio-modbus 0.17（TCP + RTU）
@@ -35,6 +41,9 @@ meval = "0.2.0"
 
 [dev-dependencies]
 crc = "3.4"
+# 健康端点路由测试（axum oneshot 请求）
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [profile.release]
 lto = true

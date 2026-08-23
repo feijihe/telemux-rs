@@ -3,6 +3,10 @@
 
 [general]
 log_level = "info"
+# 阶段 6：滚动文件日志（按日轮转，保留 log_max_files 个）。
+# 省略 log_dir = 仅输出 stdout。
+# log_dir = "logs"
+# log_max_files = 7
 
 [[devices]]
 name = "pcba-01"

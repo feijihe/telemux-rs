@@ -187,14 +187,26 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 
 **验收**：`curl` Redfish 资源树、`mbpoll` 读 Modbus 从站，数值与模拟 PCBA 一致；新增寄存器后两协议自动兼容。
 
-## 阶段 6 — 可观测性与运维 ⏳（未开始）
+## 阶段 6 — 可观测性与运维 ✅（已完成）
+
+**文档**：`docs/OPERATIONS.md`（用法）、`deploy/telemux.service`（systemd unit）。
 
 | 步骤 | 内容 |
 |---|---|
-| 6.1 | tracing 结构化日志 + 滚动文件日志（debug/告警分级） |
-| 6.2 | 优雅停机完善：SIGINT/SIGTERM → 停止轮询 → 关闭监听 → 刷日志 |
-| 6.3 | 守护进程：Windows Service（`windows-service`）/ Linux systemd unit |
-| 6.4 | 健康/状态端点（进程存活、设备连接状态、协议监听状态） |
+| 6.1 | tracing 结构化日志 + **滚动文件日志**（`tracing-appender` 按日轮转 + `log_max_files` 保留；stdout 按 `--log-level`/`RUST_LOG` 过滤，文件层记录 TRACE 全量便于排障；退出时 guard flush） |
+| 6.2 | **优雅停机**：SIGINT + SIGTERM（Unix）/ Ctrl+C（Windows）/ 服务 Stop 事件 → 主循环退出 → 通知协议+采集任务停止 → 等待任务 → flush 日志。核心逻辑重构为 `src/app.rs::run_gateway(cli, signal_rx)`，信号由外部注入 |
+| 6.3 | **守护进程**：Windows Service（`windows-service` crate，`--install-service`/`--uninstall-service`/`--service`，服务名 telemux，cfg(windows)）+ Linux systemd unit（`deploy/telemux.service`，含安全加固与内存限制） |
+| 6.4 | **健康/就绪端点**（`src/health.rs`，默认 8081）：`/healthz` 存活（恒 200）、`/readyz` 就绪（至少一台设备 2 个轮询间隔内有数据才 200，附设备连接状态与协议端点状态） |
+
+**配套改造**：
+- 配置：`[general] log_dir` / `log_max_files`（默认 7）；`[endpoints] health_enabled` / `health_port`（默认 8081）
+- 模块：`src/cli.rs`（Cli 参数）、`src/app.rs`（run_gateway 核心）、`src/health.rs`、`src/service.rs`（Windows）
+- `main.rs` 瘦身为入口：Windows 服务模式分发 + 前台模式信号转发任务
+- 依赖：`tracing-appender 0.2`；`[target.'cfg(windows)'.dependencies] windows-service 0.7`；dev-deps `tower` + `http-body-util`（健康端点路由测试）
+
+**验收（已端到端验证）**：mock + 网关（`config/test-p6.toml`）运行：
+`/healthz` 200、`/readyz` 200 且 7 传感器全部有数据、日志滚动文件生成并含 debug 样本；
+全部 62 测试通过（新增 health 3 + logging 文件写入 1），clippy 干净，dev/release/release+dashboard 三种构建均无警告。
 
 ## 阶段 7 — 测试与验证 ⏳（未开始）
 
@@ -237,7 +249,7 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 - [x] 阶段 3 处理管道
 - [x] 阶段 4 指标存储
 - [x] 阶段 5 输出协议（Redfish + Modbus Server；SNMP 暂缓）
-- [ ] 阶段 6 可观测性与运维
+- [x] 阶段 6 可观测性与运维
 - [ ] 阶段 7 测试与验证
 - [ ] 阶段 8 打包发布
 - [x] Dev Dashboard（两期均完成）

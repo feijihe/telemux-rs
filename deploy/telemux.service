@@ -1,0 +1,37 @@
+# Telmux-rs systemd 服务单元（阶段 6.3，Linux 守护进程）。
+#
+# 安装：
+#   1. 将 release 二进制安装到 /usr/local/bin/telemux
+#      （cargo build --release && cp target/release/telemux /usr/local/bin/）
+#   2. 准备配置与日志目录：
+#      mkdir -p /etc/telemux /var/log/telemux
+#      cp config/example.toml /etc/telemux/telemux.toml
+#   3. 复制本文件：cp deploy/telemux.service /etc/systemd/system/
+#   4. systemctl daemon-reload && systemctl enable --now telemux
+#
+# 说明：
+#   - 日志走 [general] log_dir 滚动文件（在配置中设置 log_dir = "/var/log/telemux"），
+#     systemd 的 stdout 仅保留 info 级。
+#   - ExecStart 中的 %n 展开为单元名；也可用 WorkingDirectory 指定相对配置路径。
+
+[Unit]
+Description=Telemux PCBA Telemetry Multi-Protocol Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/telemux --config /etc/telemux/telemux.toml
+Restart=on-failure
+RestartSec=5
+# 低资源开销目标：限制内存与文件描述符
+MemoryMax=256M
+LimitNOFILE=1024
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -25,7 +25,7 @@ pub struct Config {
     pub endpoints: EndpointsConfig,
 }
 
-/// 协议端点设置（阶段 5）。
+/// 协议端点设置（阶段 5 + 阶段 6）。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct EndpointsConfig {
     #[serde(default = "default_true")]
@@ -38,6 +38,11 @@ pub struct EndpointsConfig {
     pub modbus_port: u16,
     #[serde(default = "default_modbus_unit_id")]
     pub modbus_unit_id: u8,
+    /// 健康/就绪 HTTP 端点（阶段 6.4）。
+    #[serde(default = "default_true")]
+    pub health_enabled: bool,
+    #[serde(default = "default_health_port")]
+    pub health_port: u16,
 }
 
 impl Default for EndpointsConfig {
@@ -48,6 +53,8 @@ impl Default for EndpointsConfig {
             modbus_enabled: default_true(),
             modbus_port: default_modbus_port(),
             modbus_unit_id: default_modbus_unit_id(),
+            health_enabled: default_true(),
+            health_port: default_health_port(),
         }
     }
 }
@@ -63,6 +70,9 @@ fn default_modbus_port() -> u16 {
 }
 fn default_modbus_unit_id() -> u8 {
     1
+}
+fn default_health_port() -> u16 {
+    8081
 }
 
 impl Config {
@@ -380,22 +390,33 @@ impl Config {
 }
 
 /// 全局设置。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralConfig {
     #[serde(default = "default_log_level")]
     pub log_level: LogLevel,
+    /// 滚动文件日志目录（阶段 6）；`None` = 仅 stdout。
+    #[serde(default)]
+    pub log_dir: Option<String>,
+    /// 滚动文件日志保留的最大文件数（默认 7）。
+    #[serde(default = "default_log_max_files")]
+    pub log_max_files: u32,
 }
 
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             log_level: default_log_level(),
+            log_dir: None,
+            log_max_files: default_log_max_files(),
         }
     }
 }
 
 fn default_log_level() -> LogLevel {
     LogLevel::Info
+}
+fn default_log_max_files() -> u32 {
+    7
 }
 
 /// 日志详细程度，映射到 `logging` 中的 `tracing::Level`。

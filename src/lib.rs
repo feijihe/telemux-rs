@@ -12,16 +12,21 @@
 //!   `mock_pcba` 示例使用，release 构建中排除）
 
 pub mod acquisition;
+pub mod app;
+pub mod cli;
 pub mod computed;
 pub mod config;
 pub mod config_handle;
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 pub mod dashboard;
 pub mod domain;
+pub mod health;
 pub mod logging;
 // Mock PCBA 从站：仅开发构建编译（tests/example 使用），release 生产排除。
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 pub mod mock;
 pub mod pipeline;
 pub mod protocol;
+#[cfg(windows)]
+pub mod service;
 pub mod store;

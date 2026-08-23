@@ -10,9 +10,13 @@
 //! 所有使用者都通过统一的 `read()` / `revision()` API 访问，自身无需携带任何
 //! cfg 分支。
 
-use std::path::{Path, PathBuf};
+#[cfg(any(debug_assertions, feature = "dev-dashboard"))]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(any(debug_assertions, feature = "dev-dashboard"))]
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::config::Config;
 
@@ -48,6 +52,8 @@ impl ConfigHandle {
         }
         #[cfg(not(any(debug_assertions, feature = "dev-dashboard")))]
         {
+            // release：配置只读，不持久化路径（参数仅保持签名一致）。
+            let _ = path;
             Self {
                 inner: Arc::new(config),
                 revision: Arc::new(AtomicU64::new(0)),
