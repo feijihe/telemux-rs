@@ -68,7 +68,7 @@ async fn tcp_source_decodes_all_value_types() {
     ]);
     dev.port = handle.addr.port();
 
-    let mut source = create_source(&dev).await.unwrap();
+    let mut source = create_source(&dev, &telemux::config::SimConfig::default()).await.unwrap();
     let samples = source.read_samples(&dev.registers).await.unwrap();
     assert_eq!(samples.len(), 6);
 
@@ -102,7 +102,7 @@ async fn tcp_source_recovers_after_server_restart() {
     )]);
     dev.port = handle.addr.port();
 
-    let mut source = create_source(&dev).await.unwrap();
+    let mut source = create_source(&dev, &telemux::config::SimConfig::default()).await.unwrap();
     let samples = source.read_samples(&dev.registers).await.unwrap();
     assert_eq!(samples[0].raw_value, 0x1234 as f64);
 
@@ -116,7 +116,7 @@ async fn tcp_source_recovers_after_server_restart() {
     drop(source);
 
     // 重建数据源（如同调度器退避后的做法）并轮询。
-    let mut source = create_source(&dev).await.unwrap();
+    let mut source = create_source(&dev, &telemux::config::SimConfig::default()).await.unwrap();
     let samples = source.read_samples(&dev.registers).await.unwrap();
     assert_eq!(samples[0].raw_value, 0x1234 as f64);
 }
@@ -143,6 +143,7 @@ async fn manager_streams_samples_from_mock() {
         pipelines: vec![],
         computed: vec![],
         endpoints: Default::default(),
+        sim: Default::default(),
     };
     let handle = telemux::config_handle::ConfigHandle::new(cfg, "unused.toml".into());
 

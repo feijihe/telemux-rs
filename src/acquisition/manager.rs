@@ -87,12 +87,15 @@ async fn device_loop(
     let mut interval_ms: Option<u64> = None;
 
     loop {
-        // 热读取当前设备配置（连接参数 + 寄存器）。
-        let device: Option<DeviceConfig> = handle
-            .read()
-            .devices
-            .into_iter()
-            .find(|d| d.name == device_name);
+        // 热读取当前设备配置（连接参数 + 寄存器）与仿真配置。
+        let (device, sim): (Option<DeviceConfig>, crate::config::SimConfig) = {
+            let cfg = handle.read();
+            let device = cfg
+                .devices
+                .into_iter()
+                .find(|d| d.name == device_name);
+            (device, cfg.sim)
+        };
         let Some(device) = device else {
             warn!("device {device_name}: removed from config, stopping poll task");
             return;
@@ -109,7 +112,7 @@ async fn device_loop(
         // 等待下一个轮询 tick、写请求或关闭信号。
         tokio::select! {
             _ = interval.tick() => {
-                match poll(&device, &mut source, &mut failures, &registers, &tx).await {
+                match poll(&device, &sim, &mut source, &mut failures, &registers, &tx).await {
                     Ok(true) => return,          // 消费者已退出
                     Ok(false) => {}
                     Err(()) => {
@@ -141,13 +144,14 @@ async fn device_loop(
 /// 返回 `Ok(true)` 表示循环应停止（消费者已退出）。
 async fn poll(
     device: &DeviceConfig,
+    sim: &crate::config::SimConfig,
     source: &mut Option<Box<dyn SensorSource>>,
     failures: &mut u64,
     registers: &[crate::config::RegisterConfig],
     tx: &mpsc::Sender<Vec<RawSample>>,
 ) -> Result<bool, ()> {
     if source.is_none() {
-        match create_source(device).await {
+        match create_source(device, sim).await {
             Ok(s) => {
                 *source = Some(s);
                 *failures = 0;

@@ -48,8 +48,14 @@ async fn readyz(State(state): State<HealthState>) -> Response {
         let window = device.poll_interval_ms * 2;
         let mut with_data = 0usize;
         let mut fresh = false;
-        for reg in &device.registers {
-            let state = state.store.get(&SensorId(reg.sensor_id.clone()));
+        // sim 设备无寄存器：传感器来自 [sim] 段；否则遍历寄存器。
+        let sensor_ids: Vec<String> = if device.transport == crate::config::Transport::Sim {
+            config.sim.sensors.iter().map(|s| s.sensor_id.clone()).collect()
+        } else {
+            device.registers.iter().map(|r| r.sensor_id.clone()).collect()
+        };
+        for sensor_id in &sensor_ids {
+            let state = state.store.get(&SensorId(sensor_id.clone()));
             let ts = state
                 .as_ref()
                 .and_then(|s| s.raw.as_ref())
@@ -71,7 +77,7 @@ async fn readyz(State(state): State<HealthState>) -> Response {
         devices.push(json!({
             "name": device.name,
             "connected": fresh,
-            "sensors_total": device.registers.len(),
+            "sensors_total": sensor_ids.len(),
             "sensors_with_data": with_data,
         }));
     }
@@ -145,6 +151,7 @@ mod tests {
             pipelines: vec![],
             computed: vec![],
             endpoints: Default::default(),
+            sim: Default::default(),
         }
     }
 

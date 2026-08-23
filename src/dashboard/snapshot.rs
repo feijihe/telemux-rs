@@ -197,6 +197,7 @@ fn transport_str(t: Transport) -> String {
     match t {
         Transport::Tcp => "tcp".to_string(),
         Transport::Rtu => "rtu".to_string(),
+        Transport::Sim => "sim".to_string(),
     }
 }
 
@@ -265,6 +266,7 @@ mod tests {
             pipelines: vec![],
             computed: vec![],
             endpoints: Default::default(),
+            sim: Default::default(),
         }
     }
 

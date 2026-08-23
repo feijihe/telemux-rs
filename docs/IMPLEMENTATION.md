@@ -232,6 +232,25 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 
 **验收**：`cargo build --release` 干净、release 二进制三端点冒烟通过、安装脚本与部署文档就绪。
 
+## 阶段 8 扩展 — CDU 仿真（Simulation）✅（已完成）
+
+**文档**：`docs/SIMULATION.md`、示例配置 `config/cdu.toml`。
+
+把"假 mock"升级为**配置驱动的物理仿真数据源**，用于整机（CDU）开发/演示/验收：
+
+- **`[sim]` 配置段**：`[[sim.controls]]`（泵/阀/风扇 duty，`writable` 可映射为 Modbus 保持寄存器）+ `[[sim.sensors]]`（物理测量点，`formula` meval 稳态表达式 + `inputs` 显式依赖映射）
+- **`Transport::Sim`**：设备声明 `transport = "sim"` 即接入仿真数据源（`src/simulation.rs`，实现 `SensorSource`），复用采集/管道/协议全链路；sim 设备无需寄存器（自动产出全部 sim 传感器）
+- **物理建模原则**：物理点（Pn/Tn/Fn 独立测量位置）在 `[sim]`，**压差/温差等派生量用 `[[computed]]`**（真实系统无 dp 探头，是两路压力差分）——生产切换时 computed 原样保留
+- **变量解析**：`inputs` 映射（与 computed 一致）→ 控制变量名 → 内置时间 `t` → 传感器短名
+- **写驱动仿真**：可写控制变量 → Modbus 保持寄存器（u16 0-100）→ WriteBroker → SimSource 更新 duty → 下一轮采集生效
+- **协议映射**：仿真传感器与 computed 均进输入寄存器（f32），控制变量进保持区（u16 R/W）
+- 示例 `config/cdu.toml`：29 传感器（一次/二次侧 P/T/F、泵进出口压力、水箱液位/PH、环境/泄漏）+ 4 控制变量 + 4 派生量（泵压差×2、温差×2）
+
+**验收（已端到端验证）**：`cargo run -- --config config/cdu.toml` 无硬件运行，
+Redfish Sensors 33+、readyz `sensors_total:30`；
+**Modbus 写 pump1_duty=80 → f2_flow 109→142 L/min**（10+(80+40)*1.1），因果链成立；
+`tests/cdu_sim.rs` 集成测试通过；85 测试全绿、clippy 干净。
+
 ---
 
 ## 关键依赖速查

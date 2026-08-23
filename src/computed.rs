@@ -250,6 +250,7 @@ mod tests {
             pipelines: vec![],
             computed: vec![computed(&[("t1", "s.t1")], "t1 * 2")],
             endpoints: Default::default(),
+            sim: Default::default(),
         };
         let store = store_with(&[("s.t1", 21.0)]);
         let engine = ComputedEngine::new(&config);
@@ -296,6 +297,7 @@ mod tests {
                 computed(&[("t1", "s.t1")], "t1 * 2"),   // s.c1
             ],
             endpoints: Default::default(),
+            sim: Default::default(),
         };
         // 改 sensor_id 以便区分：computed() 助手固定 "s.computed"，
         // 这里直接手动构造两个带独立 id 的配置。

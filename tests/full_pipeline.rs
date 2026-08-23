@@ -114,6 +114,7 @@ fn sample_config() -> Config {
             expression: "v * 10".into(),
         }],
         endpoints: Default::default(),
+        sim: Default::default(),
     }
 }
 
@@ -127,7 +128,7 @@ async fn full_chain_values_consistent() {
     cfg.validate().unwrap();
 
     // 1. 采集：mock 固定值 -> 解码原始样本
-    let mut source = create_source(&cfg.devices[0]).await.unwrap();
+    let mut source = create_source(&cfg.devices[0], &telemux::config::SimConfig::default()).await.unwrap();
     let samples = source.read_samples(&cfg.devices[0].registers).await.unwrap();
     assert_eq!(samples.len(), 4);
 

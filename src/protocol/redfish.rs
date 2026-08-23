@@ -459,6 +459,7 @@ mod tests {
             pipelines: vec![],
             computed: vec![],
             endpoints: Default::default(),
+            sim: Default::default(),
         }
     }
 

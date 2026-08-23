@@ -69,8 +69,11 @@ pub trait SensorSource: Send {
 }
 
 /// 为设备创建数据源（按传输方式）。
+///
+/// `sim` 仅在 `Transport::Sim` 时使用（仿真数据源的物理模型配置）。
 pub async fn create_source(
     device: &DeviceConfig,
+    sim: &crate::config::SimConfig,
 ) -> Result<Box<dyn SensorSource>, AcquisitionError> {
     match device.transport {
         Transport::Tcp => {
@@ -79,6 +82,11 @@ pub async fn create_source(
         }
         Transport::Rtu => {
             let source = rtu::ModbusRtuSource::connect(device).await?;
+            Ok(Box::new(source) as Box<dyn SensorSource>)
+        }
+        Transport::Sim => {
+            // 仿真数据源：从全局 `[sim]` 配置计算所有传感器的值（无硬件）。
+            let source = crate::simulation::SimSource::new(sim.clone());
             Ok(Box::new(source) as Box<dyn SensorSource>)
         }
     }

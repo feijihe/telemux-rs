@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::config::{Access, Config, RegisterFunction, ValueType, WordOrder};
+use crate::config::{Access, Config, RegisterFunction, Transport, ValueType, WordOrder};
 use crate::domain::{MetricStatus, SensorId};
 use crate::store::MetricStore;
 
@@ -85,6 +85,34 @@ pub fn build_views(config: &Config, store: &MetricStore) -> Vec<SensorView> {
                 c.expression,
                 c.inputs.values().cloned().collect::<Vec<_>>().join(", ")
             )),
+            value,
+            status,
+            timestamp_ms: ts,
+        });
+    }
+    // 仿真传感器（阶段 8 扩展）：挂在对应 sim 设备名下，作为真实传感器暴露。
+    for s in &config.sim.sensors {
+        // 归属：第一个 sim transport 设备（约定），否则 device 为空。
+        let device = config
+            .devices
+            .iter()
+            .find(|d| d.transport == Transport::Sim)
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        let state = store.get(&SensorId(s.sensor_id.clone()));
+        let (value, status, ts) = value_of(&state.as_ref().map(|s| (&s.metric, &s.raw)));
+        views.push(SensorView {
+            sensor_id: s.sensor_id.clone(),
+            name: s.name.clone(),
+            device,
+            is_computed: false,
+            function: RegisterFunction::Input,
+            access: Access::Read,
+            address: 0,
+            value_type: ValueType::F32,
+            word_order: WordOrder::Big,
+            unit: s.unit.clone(),
+            formula: Some(format!("sim: {}", s.formula)),
             value,
             status,
             timestamp_ms: ts,
@@ -221,6 +249,7 @@ mod tests {
                 expression: "t * 2".into(),
             }],
             endpoints: Default::default(),
+            sim: Default::default(),
         }
     }
 

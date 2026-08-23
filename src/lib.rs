@@ -29,4 +29,5 @@ pub mod pipeline;
 pub mod protocol;
 #[cfg(windows)]
 pub mod service;
+pub mod simulation;
 pub mod store;

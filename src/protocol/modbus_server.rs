@@ -18,7 +18,7 @@ use tokio_modbus::server::Service;
 use tokio_modbus::{Address, ExceptionCode, Quantity, Request, Response};
 use tracing::{info, warn};
 
-use crate::config::{Access, Config, RegisterFunction, ValueType, WordOrder};
+use crate::config::{Access, Config, RegisterFunction, Transport, ValueType, WordOrder};
 use crate::config_handle::ConfigHandle;
 use crate::domain::SensorId;
 use crate::protocol::{WriteBroker, WriteValue};
@@ -94,6 +94,43 @@ pub fn build_table(config: &Config) -> ModbusTable {
             WordOrder::Big,
             Access::Read,
         );
+    }
+    // 仿真传感器（阶段 8）：只读、f32、位于输入寄存器区域（与 computed 同级）。
+    for s in &config.sim.sensors {
+        let device = config
+            .devices
+            .iter()
+            .find(|d| d.transport == Transport::Sim)
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        append_words(
+            &mut table.inputs,
+            &s.sensor_id,
+            &device,
+            ValueType::F32,
+            WordOrder::Big,
+            Access::Read,
+        );
+    }
+    // 仿真控制变量（阶段 8）：可写控制变量映射为保持寄存器（u16，
+    // 值域 0-100），写保持寄存器 → 更新控制变量 → 驱动仿真。
+    for c in &config.sim.controls {
+        if c.writable {
+            let device = config
+                .devices
+                .iter()
+                .find(|d| d.transport == Transport::Sim)
+                .map(|d| d.name.clone())
+                .unwrap_or_default();
+            append_words(
+                &mut table.holding,
+                &c.name,
+                &device,
+                ValueType::U16,
+                WordOrder::Big,
+                Access::ReadWrite,
+            );
+        }
     }
     table
 }
@@ -414,6 +451,7 @@ mod tests {
                 expression: "t".into(),
             }],
             endpoints: Default::default(),
+            sim: Default::default(),
         }
     }
 

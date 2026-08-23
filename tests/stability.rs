@@ -56,6 +56,7 @@ fn full_config(port: u16) -> Config {
         pipelines: vec![],
         computed: vec![],
         endpoints: Default::default(),
+        sim: Default::default(),
     }
 }
 

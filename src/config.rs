@@ -23,6 +23,71 @@ pub struct Config {
     /// 协议端点（阶段 5）：Redfish / Modbus 服务器。
     #[serde(default)]
     pub endpoints: EndpointsConfig,
+    /// CDU 仿真建模（阶段 8扩展）：配置一台虚拟 CDU 的传感器布局与
+    /// 物理耦合关系，产出模拟数据（无真实硬件）。见 `docs/SIMULATION.md`。
+    #[serde(default)]
+    pub sim: SimConfig,
+}
+
+/// CDU 仿真建模配置（`[sim]`）。
+///
+/// 用**稳态代数模型**表达传感器间的物理因果（如泵 duty→流量/压差、
+/// 比例阀 duty→一次侧流量→二次侧温度），供开发/演示/验收使用。
+/// 生产环境将设备 `transport` 改回 `tcp`/`rtu` 即接真实 CDU。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SimConfig {
+    /// 控制变量（泵/阀/风扇 duty 等），可被协议层写入以驱动仿真。
+    #[serde(default)]
+    pub controls: Vec<SimControl>,
+    /// 仿真传感器：每个通过 formula 表达式从控制变量与其他传感器求值。
+    #[serde(default)]
+    pub sensors: Vec<SimSensor>,
+}
+
+/// 仿真控制变量（如 pump1_duty，0-100）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimControl {
+    /// 控制变量名，供传感器 formula 引用（如 "pump1_duty"）。
+    pub name: String,
+    /// 初始值。
+    #[serde(default)]
+    pub initial: f64,
+    /// 单位（信息性）。
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// 是否可写（协议层 PATCH/Modbus 可改变 duty）。
+    #[serde(default)]
+    pub writable: bool,
+}
+
+/// 仿真传感器：由稳态表达式求值，作为原始样本产出。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimSensor {
+    /// 全网关唯一指标键（如 "cdu.pump1.dp"）。
+    pub sensor_id: String,
+    /// 显示名称。
+    pub name: String,
+    /// 传感器类型：pressure/temperature/flow/level/ph/leak/...
+    /// 用于协议层分类（Redfish ReadingType）。
+    #[serde(default)]
+    pub kind: String,
+    /// 物理单位。
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// 稳态求值表达式（meval 语法）。
+    ///
+    /// 变量解析规则（优先级从高到低）：
+    /// 1. `inputs` 映射的键 → 引用的仿真传感器（或控制变量）；
+    /// 2. 控制变量名（如 `pump1_duty`）；
+    /// 3. 内置时间 `t`（自启动秒数，用于模拟缓慢波动）；
+    /// 4. 其他仿真传感器的短名（sensor_id 末段，如 `cdu.pri.p1` → `p1`）。
+    ///
+    /// 注：meval 变量名不能含 `.`，故跨传感器引用推荐用 `inputs` 显式映射
+    /// （与 `[[computed]]` 一致），短名仅在本机无歧义时可用。
+    pub formula: String,
+    /// 变量名 → 引用的传感器/控制变量（可选，显式依赖映射）。
+    #[serde(default)]
+    pub inputs: std::collections::HashMap<String, String>,
 }
 
 /// 协议端点设置（阶段 5 + 阶段 6）。
@@ -131,6 +196,15 @@ impl Config {
                         bail!("device `{}`: rtu transport requires `baud_rate`", device.name);
                     }
                 }
+                Transport::Sim => {
+                    // 仿真设备：不要求 host/port/串口，但必须有 [sim] 配置。
+                    if self.sim.controls.is_empty() {
+                        bail!(
+                            "device `{}`: sim transport requires `[sim]` controls",
+                            device.name
+                        );
+                    }
+                }
             }
             if device.poll_interval_ms == 0 {
                 bail!("device `{}`: poll_interval_ms must be > 0", device.name);
@@ -146,7 +220,7 @@ impl Config {
                     device.reconnect_max_ms
                 );
             }
-            if device.registers.is_empty() {
+            if device.registers.is_empty() && device.transport != Transport::Sim {
                 bail!("device `{}`: at least one register is required", device.name);
             }
             if device.registers.len() > 256 {
@@ -214,7 +288,12 @@ impl Config {
             }
         }
 
-        // 管道：sensor_id 必须引用已知寄存器、必须唯一，
+        // 仿真传感器也可作为管道输入（无寄存器，采集层直接产出样本）。
+        for s in &self.sim.sensors {
+            known_sensors.insert(s.sensor_id.as_str());
+        }
+
+        // 管道：sensor_id 必须引用已知寄存器（或仿真传感器）、必须唯一，
         // 且包含有效的阶段参数。
         let mut seen_pipelines: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for pipe in &self.pipelines {
@@ -319,6 +398,49 @@ impl Config {
         for c in &self.computed {
             visit(&c.sensor_id, &self.computed, &mut state)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
+
+        // 仿真（[sim]）：控制变量名唯一、sensor_id 唯一、表达式可解析。
+        let mut sim_controls: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for c in &self.sim.controls {
+            if !sim_controls.insert(c.name.as_str()) {
+                bail!("duplicate sim control `{}`", c.name);
+            }
+        }
+        let mut sim_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for s in &self.sim.sensors {
+            if !seen_sensors.insert(s.sensor_id.as_str()) {
+                bail!(
+                    "duplicate sensor_id `{}` (sim must not collide with registers/computed)",
+                    s.sensor_id
+                );
+            }
+            if !sim_ids.insert(s.sensor_id.as_str()) {
+                bail!("duplicate sim sensor_id `{}`", s.sensor_id);
+            }
+            if s.name.is_empty() {
+                bail!("sim sensor `{}`: name is required", s.sensor_id);
+            }
+            // 表达式必须可解析。变量引用正确性（∈ 控制变量 ∪ 传感器）由
+            // SimSource 求值时用 bindn 校验 —— meval 无 variables()，无法在
+            // 配置期枚举变量，故延迟到求值并降级为 warn。
+            use std::str::FromStr;
+            meval::Expr::from_str(&s.formula).map_err(|e| {
+                anyhow::anyhow!(
+                    "sim sensor `{}`: invalid formula `{}`: {e}",
+                    s.sensor_id,
+                    s.formula
+                )
+            })?;
+            // inputs 映射的目标必须是控制变量名或其它仿真传感器 id。
+            for (var, target) in &s.inputs {
+                if !sim_controls.contains(target.as_str()) && !sim_ids.contains(target.as_str()) {
+                    bail!(
+                        "sim sensor `{}`: input `{var}` references unknown target `{target}`",
+                        s.sensor_id
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -513,6 +635,8 @@ pub enum Transport {
     #[default]
     Tcp,
     Rtu,
+    /// 仿真数据源：无硬件，从 `[sim]` 配置计算传感器值（阶段 8 扩展）。
+    Sim,
 }
 
 /// 寄存器地址空间（功能码）。覆盖四个 Modbus 区域。
@@ -1054,5 +1178,47 @@ c1v = "c1"
 "#;
         let cfg: Config = toml::from_str(toml).unwrap();
         cfg.validate().unwrap();
+    }
+
+    #[test]
+    fn parses_cdu_sim_config() {
+        // 端到端：CDU 仿真配置（config/cdu.toml）可解析且通过校验。
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/cdu.toml");
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.devices.len(), 1);
+        assert_eq!(cfg.devices[0].transport, Transport::Sim);
+        assert!(cfg.devices[0].registers.is_empty(), "sim 设备无需寄存器");
+        assert_eq!(cfg.sim.controls.len(), 4, "pump1/pump2/valve1/fan");
+        assert!(!cfg.sim.sensors.is_empty());
+        // 派生量（computed）存在。
+        assert!(cfg
+            .computed
+            .iter()
+            .any(|c| c.sensor_id == "cdu.pump1.dp"));
+    }
+
+    #[test]
+    fn rejects_sim_sensor_unknown_input() {
+        let toml = r#"
+[[devices]]
+name = "a"
+transport = "sim"
+
+[sim]
+[[sim.controls]]
+name = "duty"
+initial = 50
+writable = true
+[[sim.sensors]]
+sensor_id = "s.flow"
+name = "Flow"
+kind = "flow"
+formula = "duty * x"
+[sim.sensors.inputs]
+x = "s.nope"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("unknown target"), "got: {err}");
     }
 }
