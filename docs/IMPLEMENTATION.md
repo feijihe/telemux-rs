@@ -219,10 +219,18 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 
 **验收**：77 个测试全绿（68 lib + 9 集成），clippy 零警告，dev/release 构建均通过；`cargo test --release` 通过。
 
-## 阶段 8 — 打包发布 ⏳（未开始）
+## 阶段 8 — 打包发布 ✅（已完成）
 
-- Release 构建优化（体积/内存）、Windows 与 Linux 双平台打包。
-- 交付示例配置、MIB 文件、systemd/service 安装脚本、使用文档。
+**文档**：`docs/DEPLOYMENT.md`（部署指南）。
+
+| 项 | 内容 |
+|---|---|
+| Release 构建 | `lto` + `codegen-units=1` + `strip` + `panic=abort`；Windows telemux.exe ≈ 2.7 MB；**字符串级验证** release 二进制不含 dashboard/mock/动态配置（仅 CLI 参数名含 `--dashboard-port` 等字样，属预期） |
+| 安装脚本 | `deploy/install.sh`（Linux：构建→安装→配置→systemd 启用）、`deploy/install.bat`（Windows：构建→复制→交互式服务安装） |
+| 平台交付 | Linux systemd（`deploy/telemux.service`）、Windows Service（`--install-service`）；双平台配置/文档齐备 |
+| 冒烟测试 | **release 二进制端到端**：mock + `telemux.exe --config test-p6.toml` 运行 → healthz/readyz/Redfish 全 200、滚动日志持续写入 |
+
+**验收**：`cargo build --release` 干净、release 二进制三端点冒烟通过、安装脚本与部署文档就绪。
 
 ---
 
@@ -256,5 +264,5 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 - [x] 阶段 5 输出协议（Redfish + Modbus Server；SNMP 暂缓）
 - [x] 阶段 6 可观测性与运维
 - [x] 阶段 7 测试与验证
-- [ ] 阶段 8 打包发布
+- [x] 阶段 8 打包发布
 - [x] Dev Dashboard（两期均完成）
