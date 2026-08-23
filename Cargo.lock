@@ -1007,6 +1007,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "telemux-sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "meval",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-modbus",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "thiserror"
 version = "2.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Telemux-Sim — CDU 仿真器</title>
+<style>
+  body { font-family: Consolas, "Microsoft YaHei", monospace; margin: 20px; background: #f5f6fa; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 24px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; font-size: 13px; }
+  th { background: #2f3b52; color: #fff; }
+  tr:nth-child(even) { background: #f9f9f9; }
+  .addr { color: #888; font-size: 12px; }
+  .mono { font-family: Consolas, monospace; }
+  .status { font-size: 12px; color: #888; margin-bottom: 12px; }
+  #controls td:first-child { font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>Telemux-Sim · CDU 仿真器</h1>
+<div class="status" id="status">加载中…</div>
+
+<h2>控制变量（Modbus 保持寄存器，可写）</h2>
+<table id="controls">
+  <thead><tr><th>地址</th><th>名称</th><th>值</th><th>单位</th><th>可写</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>传感器（Modbus 输入寄存器，f32 双字）</h2>
+<table id="sensors">
+  <thead><tr><th>sensor_id</th><th>名称</th><th>类型</th><th>值</th><th>单位</th><th>公式</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h2>寄存器地图原始值</h2>
+<table id="raw">
+  <thead><tr><th>区域</th><th>地址</th><th>槽位</th><th>原始值</th><th>解码</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<script>
+const REFRESH_MS = 1000;
+
+async function refresh() {
+  try {
+    const res = await fetch('/api/state');
+    const data = await res.json();
+
+    const ctbody = document.querySelector('#controls tbody');
+    ctbody.innerHTML = data.controls.map((c, i) =>
+      `<tr><td class="addr">0x${i.toString(16).padStart(4,'0')}</td><td>${c.name}</td>` +
+      `<td class="mono">${Number(c.value).toFixed(1)}</td><td>${c.unit ?? ''}</td>` +
+      `<td>${c.writable ? '✓' : '—'}</td></tr>`).join('');
+
+    const stbody = document.querySelector('#sensors tbody');
+    stbody.innerHTML = data.sensors.map(s =>
+      `<tr><td>${s.sensor_id}</td><td>${s.name}</td><td>${s.kind}</td>` +
+      `<td class="mono">${s.value === null ? '—' : Number(s.value).toFixed(3)}</td>` +
+      `<td>${s.unit ?? ''}</td><td>${s.formula}</td></tr>`).join('');
+
+    const rtbody = document.querySelector('#raw tbody');
+    const rows = [];
+    for (const h of data.holding) {
+      rows.push(`<tr><td>保持</td><td class="addr">0x${h.addr.toString(16).padStart(4,'0')}</td>` +
+        `<td>${h.slot ? h.slot.control : '空'}</td><td class="mono">${h.raw}</td>` +
+        `<td>${h.slot ? (h.slot.writable ? '可写 u16' : '只读 u16') : '—'}</td></tr>`);
+    }
+    for (const inp of data.inputs) {
+      rows.push(`<tr><td>输入</td><td class="addr">0x${inp.addr.toString(16).padStart(4,'0')}</td>` +
+        `<td>${inp.sensor ?? '空'}</td>` +
+        `<td class="mono">${inp.raw_hi} ${inp.raw_lo}</td>` +
+        `<td class="mono">${Number(inp.value_f32).toFixed(3)}</td></tr>`);
+    }
+    rtbody.innerHTML = rows.join('');
+
+    document.getElementById('status').textContent =
+      `已刷新 ${new Date().toLocaleTimeString()} · ${data.controls.length} 控制变量 · ${data.sensors.length} 传感器`;
+  } catch (e) {
+    document.getElementById('status').textContent = `刷新失败: ${e}`;
+  }
+}
+
+setInterval(refresh, REFRESH_MS);
+refresh();
+</script>
+</body>
+</html>

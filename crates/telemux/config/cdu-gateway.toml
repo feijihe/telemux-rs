@@ -1,0 +1,236 @@
+# Telmux-rs 网关对接 CDU 仿真器配置（workspace 拆分后）
+#
+# 与 `crates/telemux-sim` 模拟器配合：网关以 transport="tcp" 连接模拟器
+# 从站（1502），与连接真实 CDU 完全同构。派生量（压差/温差）在网关侧
+# 用 [[computed]] 计算，与数据来源无关。
+#
+# 模拟器寄存器地图（见 telemux-sim 的 config/cdu.toml + docs/SIMULATION.md）：
+#   保持寄存器 0x0000 起：控制变量 u16（pump1_duty@0, pump2_duty@1,
+#                           valve1_duty@2, fan_duty@3），0-100 可写
+#   输入寄存器 0x0000 起：传感器 f32 双字（Big 字序），每传感器 2 字，
+#                          按 telemux-sim 配置顺序
+
+[general]
+log_level = "info"
+
+[[devices]]
+name = "cdu-01"
+transport = "tcp"
+unit_id = 1
+host = "127.0.0.1"
+port = 1502
+poll_interval_ms = 1000
+timeout_ms = 500
+reconnect_initial_ms = 1000
+reconnect_max_ms = 15000
+
+# ---- 控制变量（保持寄存器，read_write：网关写入 → 模拟器驱动模型）----
+[[devices.registers]]
+name = "pump1_duty"
+sensor_id = "cdu.pump1_duty"
+function = "holding"
+address = 0
+value_type = "u16"
+unit = "%"
+access = "read_write"
+
+[[devices.registers]]
+name = "pump2_duty"
+sensor_id = "cdu.pump2_duty"
+function = "holding"
+address = 1
+value_type = "u16"
+unit = "%"
+access = "read_write"
+
+[[devices.registers]]
+name = "valve1_duty"
+sensor_id = "cdu.valve1_duty"
+function = "holding"
+address = 2
+value_type = "u16"
+unit = "%"
+access = "read_write"
+
+[[devices.registers]]
+name = "fan_duty"
+sensor_id = "cdu.fan_duty"
+function = "holding"
+address = 3
+value_type = "u16"
+unit = "%"
+access = "read_write"
+
+# ---- 传感器（输入寄存器，f32 双字，Big）----
+# 输入区地址分配（模拟器配置顺序，每传感器 2 字）：
+#   cdu.pri.p1@0   cdu.pri.p2@2   cdu.pri.t1@4   cdu.pri.t2@6
+#   cdu.pri.f1@8   cdu.pri.p3@10  cdu.pri.p4@12  cdu.pri.t3@14
+#   cdu.pri.t4@16  cdu.pri.l1@18  cdu.sec.f2@20 cdu.sec.p5@22
+#   cdu.sec.p6@24  cdu.sec.t5@26  cdu.sec.t6@28 cdu.sec.p7@30
+#   cdu.sec.p8@32  cdu.sec.t7@34  cdu.sec.t8@36 cdu.pump1.in_p@38
+#   cdu.pump1.out_p@40 cdu.pump2.in_p@42 cdu.pump2.out_p@44
+#   cdu.tank.p9@46 cdu.tank.p10@48 cdu.tank.level@50 cdu.tank.ph@52
+#   cdu.env.temp@54 cdu.env.rh@56 cdu.leak@58
+
+[[devices.registers]]
+name = "pri_p1"
+sensor_id = "cdu.pri.p1"
+function = "input"
+address = 0
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "kPa"
+access = "read"
+
+[[devices.registers]]
+name = "pri_t1"
+sensor_id = "cdu.pri.t1"
+function = "input"
+address = 4
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "°C"
+access = "read"
+
+[[devices.registers]]
+name = "pri_f1"
+sensor_id = "cdu.pri.f1"
+function = "input"
+address = 8
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "L/min"
+access = "read"
+
+[[devices.registers]]
+name = "sec_f2"
+sensor_id = "cdu.sec.f2"
+function = "input"
+address = 20
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "L/min"
+access = "read"
+
+[[devices.registers]]
+name = "sec_t5"
+sensor_id = "cdu.sec.t5"
+function = "input"
+address = 26
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "°C"
+access = "read"
+
+[[devices.registers]]
+name = "sec_t7"
+sensor_id = "cdu.sec.t7"
+function = "input"
+address = 34
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "°C"
+access = "read"
+
+[[devices.registers]]
+name = "pump1_in_p"
+sensor_id = "cdu.pump1.in_p"
+function = "input"
+address = 38
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "kPa"
+access = "read"
+
+[[devices.registers]]
+name = "pump1_out_p"
+sensor_id = "cdu.pump1.out_p"
+function = "input"
+address = 40
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "kPa"
+access = "read"
+
+[[devices.registers]]
+name = "pump2_in_p"
+sensor_id = "cdu.pump2.in_p"
+function = "input"
+address = 42
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "kPa"
+access = "read"
+
+[[devices.registers]]
+name = "pump2_out_p"
+sensor_id = "cdu.pump2.out_p"
+function = "input"
+address = 44
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "kPa"
+access = "read"
+
+# ---- 处理管道（原始值即物理值）----
+[[pipeline]]
+sensor_id = "cdu.sec.f2"
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+unit = "L/min"
+
+[[pipeline]]
+sensor_id = "cdu.pri.f1"
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+unit = "L/min"
+
+# ---- 派生量（computed）：压差/温差（网关侧计算，与数据来源无关）----
+[[computed]]
+sensor_id = "cdu.pump1.dp"
+name = "Pump1 Differential Pressure"
+unit = "kPa"
+expression = "p_out - p_in"
+[computed.inputs]
+p_out = "cdu.pump1.out_p"
+p_in = "cdu.pump1.in_p"
+
+[[computed]]
+sensor_id = "cdu.pump2.dp"
+name = "Pump2 Differential Pressure"
+unit = "kPa"
+expression = "p_out - p_in"
+[computed.inputs]
+p_out = "cdu.pump2.out_p"
+p_in = "cdu.pump2.in_p"
+
+[[computed]]
+sensor_id = "cdu.sec.delta_t"
+name = "Secondary Delta T (T5 - T7)"
+unit = "°C"
+expression = "t5 - t7"
+[computed.inputs]
+t5 = "cdu.sec.t5"
+t7 = "cdu.sec.t7"
+
+# ---- 协议端点 ----
+[endpoints]
+redfish_enabled = true
+redfish_port = 8000
+modbus_enabled = true
+modbus_port = 1503
+modbus_unit_id = 1
+health_enabled = true
+health_port = 8081

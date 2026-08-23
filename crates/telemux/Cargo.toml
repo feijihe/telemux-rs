@@ -1,0 +1,42 @@
+[package]
+name = "telemux"
+description = "PCBA telemetry multi-protocol gateway: Modbus acquisition, Redfish/Modbus exposure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-modbus = { workspace = true }
+tokio-serial = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+futures-util = { workspace = true }
+meval = { workspace = true }
+
+# Windows Service（阶段 6.3）：仅 Windows 平台编译
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.7"
+
+[dev-dependencies]
+crc = "3.4"
+# 健康端点路由测试（axum oneshot 请求）
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[features]
+default = []
+# 开发调试面板（Web + WebSocket）。模块由 cfg(any(debug_assertions, feature = "dev-dashboard"))
+# 门控：debug 构建自动启用；release 默认排除；如需在 release 下临时启用排查问题，
+# 用 `cargo build --release --features dev-dashboard`。
+dev-dashboard = []
