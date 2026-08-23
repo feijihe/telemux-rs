@@ -1,16 +1,18 @@
-//! Telmux-rs: PCBA telemetry multi-protocol gateway.
+//! Telmux-rs：PCBA 遥测多协议网关。
 //!
-//! Layers (see `docs/IMPLEMENTATION.md`):
-//! - [`config`]: TOML-driven configuration
-//! - [`domain`]: core types (sensor id, raw samples, metrics)
-//! - [`acquisition`]: sensor acquisition layer (Modbus TCP/RTU via tokio-modbus)
-//! - [`store`]: latest-value raw sample store
-//! - [`logging`]: tracing + tracing-subscriber setup
-//! - [`dashboard`]: dev-only web dashboard (compile-time gated, see Cargo.toml)
-//! - [`mock`]: mock PCBA Modbus slave (dev-only, compile-time gated — used by
-//!   tests and the `mock_pcba` example, excluded from release builds)
+//! 分层结构（见 `docs/IMPLEMENTATION.md`）：
+//! - [`config`]：TOML 驱动的配置
+//! - [`computed`]：虚拟传感器（由其他传感器派生出的指标）
+//! - [`domain`]：核心类型（传感器 id、原始样本、指标）
+//! - [`acquisition`]：传感器采集层（通过 tokio-modbus 的 Modbus TCP/RTU）
+//! - [`store`]：最新值原始样本存储
+//! - [`logging`]：tracing + tracing-subscriber 日志设置
+//! - [`dashboard`]：仅开发用的 Web 仪表盘（编译期门控，见 Cargo.toml）
+//! - [`mock`]：模拟 PCBA Modbus 从站（仅开发用，编译期门控——供测试和
+//!   `mock_pcba` 示例使用，release 构建中排除）
 
 pub mod acquisition;
+pub mod computed;
 pub mod config;
 pub mod config_handle;
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
@@ -21,4 +23,5 @@ pub mod logging;
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 pub mod mock;
 pub mod pipeline;
+pub mod protocol;
 pub mod store;

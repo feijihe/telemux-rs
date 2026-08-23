@@ -15,16 +15,16 @@ use telemux::store::MetricStore;
 #[command(
     name = "telemux",
     version,
-    about = "PCBA telemetry multi-protocol gateway (Modbus acquisition)"
+    about = "PCBA 遥测多协议网关（Modbus 采集）"
 )]
 struct Cli {
-    /// Path to the TOML config file
+    /// TOML 配置文件路径
     #[arg(short, long, default_value = "config/example.toml")]
     config: PathBuf,
-    /// Override log level: trace|debug|info|warn|error
+    /// 覆盖日志级别：trace|debug|info|warn|error
     #[arg(long)]
     log_level: Option<String>,
-    /// Dev dashboard port (dev builds only, default 8080)
+    /// 开发仪表盘端口（仅开发构建，默认 8080）
     #[arg(long)]
     dashboard_port: Option<u16>,
 }
@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let config = Config::load(&cli.config)?;
-    // Runtime handle: mutable (hot-update) in dev builds, read-only in release.
+    // 运行时句柄：开发构建可变（热更新），release 只读。
     let handle = ConfigHandle::new(config, cli.config.clone());
 
     let level = match cli
@@ -54,25 +54,30 @@ async fn main() -> anyhow::Result<()> {
         handle.read().devices.len()
     );
 
-    // Acquisition -> consumer channel. The consumer feeds the metric store
-    // (raw + pipeline metric); protocol layers (phase 5) read the store.
+    // 采集 -> 消费者通道。消费者写入指标存储
+    // （raw + 管道指标）；协议层（阶段 5）读取存储。
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<RawSample>>(64);
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     let manager = AcquisitionManager::new(&handle);
-    let tasks = manager.spawn(handle.clone(), tx.clone(), shutdown_rx.clone());
-    drop(tx); // device tasks own their senders; consumer owns the receiver
+    let spawned = manager.spawn(handle.clone(), tx.clone(), shutdown_rx.clone());
+    let tasks = spawned.tasks;
+    let broker = std::sync::Arc::new(spawned.broker);
+    drop(tx); // 设备任务持有各自的 sender；消费者持有 receiver
 
-    // Metric store (latest raw + metric per sensor) and per-sensor pipelines.
+    // 指标存储（每传感器最新 raw + 指标）、每传感器管道和
+    // computed（虚拟）传感器。
     let store = Arc::new(MetricStore::new());
     let mut pipelines = PipelinesCache::new(&handle.read());
+    let mut computed = telemux::computed::ComputedEngine::new(&handle.read());
     info!(
-        "{} pipeline(s) configured (config hot-update: {})",
+        "{} pipeline(s), {} computed sensor(s) (config hot-update: {})",
         pipelines.len(),
+        computed.len(),
         if handle.is_mutable() { "on" } else { "off" }
     );
 
-    // Dev dashboard (compile-time gated; absent from release builds).
+    // 开发仪表盘（编译期门控；release 构建中不存在）。
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     let _dashboard = telemux::dashboard::server::spawn(
         handle.clone(),
@@ -81,10 +86,52 @@ async fn main() -> anyhow::Result<()> {
         shutdown_rx.clone(),
     );
 
-    // Main loop: consume acquisition batches (store raw, run pipeline, store
-    // metric) until Ctrl+C or the channel closes. Pipelines are not Send
-    // (meval stages hold Rc), so this runs inline in the main task instead of
-    // a spawned task.
+    // 协议端点（阶段 5）：Redfish + Modbus 服务器，由配置驱动。
+    let endpoints = handle.read().endpoints;
+    let mut protocol_tasks = Vec::new();
+    if endpoints.redfish_enabled {
+        let router = telemux::protocol::redfish::router(handle.clone(), store.clone(), broker.clone());
+        let port = endpoints.redfish_port;
+        let mut shutdown = shutdown_rx.clone();
+        protocol_tasks.push(tokio::spawn(async move {
+            let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}"))
+                .await
+                .expect("bind redfish port");
+            info!("redfish listening on 0.0.0.0:{port}");
+            tokio::select! {
+                res = axum::serve(listener, router) => {
+                    if let Err(e) = res { warn!("redfish server error: {e}"); }
+                }
+                _ = shutdown.changed() => info!("redfish: shutting down"),
+            }
+        }));
+    }
+    if endpoints.modbus_enabled {
+        let h = handle.clone();
+        let s = store.clone();
+        let b = broker.clone();
+        let port = endpoints.modbus_port;
+        let unit_id = endpoints.modbus_unit_id;
+        let shutdown = shutdown_rx.clone();
+        protocol_tasks.push(tokio::spawn(async move {
+            if let Err(e) = telemux::protocol::modbus_server::run(
+                h,
+                s,
+                b,
+                port,
+                unit_id,
+                shutdown,
+            )
+            .await
+            {
+                warn!("modbus server stopped: {e}");
+            }
+        }));
+    }
+
+    // 主循环：消费采集批次（存储 raw、运行管道、存储指标），直到
+    // Ctrl+C 或通道关闭。管道不是 Send（meval 阶段持有 Rc），
+    // 因此在此主任务内联运行，而非派生任务。
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
     loop {
@@ -93,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
                 match maybe_batch {
                     Some(batch) => {
                         pipelines.refresh(&handle);
+                        computed.refresh(&handle);
                         store.update_batch_raw(&batch);
                         for s in &batch {
                             info!(
@@ -115,7 +163,7 @@ async fn main() -> anyhow::Result<()> {
                                             metric.unit.as_deref().unwrap_or(""),
                                             status_str(metric.status)
                                         );
-                                        store.update_metric(s, metric);
+                                        store.update_metric(Some(s), metric);
                                     }
                                     Err(e) => {
                                         warn!("pipeline failed for {}: {e}", s.sensor_id);
@@ -123,6 +171,8 @@ async fn main() -> anyhow::Result<()> {
                                 }
                             }
                         }
+                        // 本批次后重新求值 computed（虚拟）传感器。
+                        computed.run(&store);
                     }
                     None => {
                         info!("sample consumer: channel closed, all devices stopped");
@@ -139,6 +189,9 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = shutdown_tx.send(true);
     for t in tasks {
+        let _ = t.await;
+    }
+    for t in protocol_tasks {
         let _ = t.await;
     }
     info!("telemux stopped");

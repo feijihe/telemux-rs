@@ -60,6 +60,17 @@ Redfish       SNMP     Modbus
 **验收**：坏配置报错定位到具体字段；`config/example.toml` 可加载。
 **说明**：`[[pipeline]]`、`[endpoints]`、`[[alerts]]` 配置段留待阶段 3/5 加入，当前解析器忽略未知字段以保证前向兼容。
 
+### 阶段 1 扩展（阶段 5 需求，待实现）
+
+为支持 PCBA 的 R/W 寄存器、bit 信号与二次计算指标，配置模型扩展：
+
+| 项 | 变更 |
+|---|---|
+| `RegisterConfig.access` | 新增：`"read"`（默认）\| `"read_write"` —— 决定协议层能否写入 |
+| `RegisterFunction` | `holding`/`input` 之外新增 **`coil`**（0x01 读/0x05 写）与 **`discrete_input`**（0x02 只读）—— 覆盖 Modbus 4 区 |
+| `ValueType` | `u16/i16/u32/i32/f32` 之外新增 **`bool`**（bit 型，配合 coil/discrete_input，如液位/漏液） |
+| `[[computed]]`（新段） | 虚拟传感器：由其他寄存器/计算指标经表达式二次计算（露点、温差、压差），见阶段 3 扩展 |
+
 ## 阶段 2 — 采集层（Acquisition Layer）✅（已完成）
 
 | 步骤 | 内容 |
@@ -75,6 +86,13 @@ Redfish       SNMP     Modbus
 `cargo run` 持续输出采样日志。
 **说明**：RTU 真实串口路径依赖硬件，自动化测试覆盖 RTU 帧协议（duplex + CRC16 校验），
 串口打开路径为编译级覆盖。
+
+### 阶段 2 扩展（阶段 5 需求，待实现）
+
+- **读 bit**：`coil` → `read_coils`，`discrete_input` → `read_discrete_inputs`（tokio-modbus
+  `Reader` 已支持）；`bool` 解码为 0.0/1.0 的 `RawSample`
+- **写路径**：`SensorSource` 新增 `write_holding_register(sensor_id, value)` /
+  `write_single_coil(sensor_id, value)`（底层 `Writer` trait）；写前按映射表校验 `access`
 
 ## Dev Dashboard（开发调试面板）✅（三期完成）
 
@@ -100,6 +118,30 @@ Redfish       SNMP     Modbus
 **验收**：各 stage 单测 + 管道集成测试通过；`config/example.toml` 演示 5 条管道（换算/滤波/阈值/聚合）。
 **已知坑**：TOML 键 `[[pipeline]]`（单数）与 Rust 字段 `pipelines` 不匹配会导致静默为空 —— 已用 `#[serde(rename = "pipeline")]` 修复并补测试。
 
+### 阶段 3 扩展：`[[computed]]` 虚拟传感器（阶段 5 需求，待实现）
+
+由多个读取值/计算指标二次计算出新指标（露点、温差、压差），**不直接读寄存器**：
+
+```toml
+[[computed]]
+sensor_id = "pcba-01.dew_point"      # 全局唯一，自动成为协议层传感器
+name = "dew_point"
+unit = "°C"
+# 输入变量：键为表达式变量名，值为引用的 sensor_id
+inputs = { t = "pcba-01.env_temp", h = "pcba-01.env_humidity" }
+# 纯数学表达式（meval 多变量，内置 ln/exp/...）：Magnus 露点公式
+expression = "243.5 * (ln(h/100) + 17.67*t/(243.5+t)) / (17.67 - ln(h/100) - 17.67*t/(243.5+t))"
+```
+
+- **处理时机**：采集 consumer 每批样本后，对每个 computed 求值（输入取 MetricStore 最新值；
+  输入未就绪则跳过），结果以"无 raw 的 metric"写入 MetricStore
+- **自动出现**：computed 与真实传感器同等出现在 dashboard / Redfish / Modbus 点位表中
+  （分类只看 unit，不区分来源）
+- **校验**：sensor_id 全局唯一且不与寄存器重复；inputs 引用的 sensor_id 必须存在；
+  表达式可解析且变量名 ⊆ inputs 键；表达式可引用其他 computed（需按拓扑顺序求值，防环）
+- 存储扩展：`SensorState.raw` 改为 `Option<RawSample>`（computed 无 raw），
+  所有读取方（dashboard/redfish/modbus）处理 None
+
 ## 阶段 4 — 指标存储（Metric Store）✅（已完成）
 
 | 步骤 | 内容 |
@@ -112,22 +154,38 @@ Redfish       SNMP     Modbus
 **Dev Dashboard 第二期**：`snapshot.rs` 已从 `MetricStore` 读取并填充 `metric` 字段（含状态着色数据），
 前端无需改动 —— 见 `docs/DEV_DASHBOARD.md`。
 
-## 阶段 5 — 输出协议（三选并行，可逐个交付）⏳（未开始）
+## 阶段 5 — 输出协议（Redfish + Modbus Server）✅（已完成；SNMP 暂缓）
 
-**5.1 Redfish（HTTP，axum）**
-- 资源树：`/redfish/v1` → `/Chassis/{id}/Thermal`、`/Power`、`/Sensors/{id}`，按 Redfish Schema 风格返回 JSON。
-- 从 Metric Store 实时取数，配置驱动资源映射。
+**范围调整**：SNMP 因 Rust 生态不成熟**暂不实现**（本阶段交付 Redfish + Modbus Server）。
 
-**5.2 Modbus Server（tokio-modbus server）**
-- 同时起 TCP 从站（可另配 RTU 串口从站）。
-- 配置驱动寄存器映射表：`metric → 保持/输入寄存器 + 地址 + 缩放`。
+**设计文档**：`docs/REDFISH.md`、`docs/MODBUS_SERVER.md`（实现与文档一致）。
 
-**5.3 SNMP（生态最不成熟，先做 spike）**
-- 优先尝试 `snmp_rust_agent` 或 `async-snmp`（tokio 原生 agent）。
-- 不适用则自实现最小 SNMPv1/v2c agent（UDP + BER 编解码，GET/GETNEXT/GETBULK），OID 映射配置驱动。
-- Trap 告警为可选后续项。
+**5.1 Redfish（axum，端口 `[endpoints] redfish_port` 默认 8000）**
+- 资源树：`/redfish/v1` → `/Chassis/{device}` → `/Thermal`、`/Power`、`/Sensors/{sensorId}`，Redfish Schema 风格 JSON
+- **配置驱动**：每次请求从 `ConfigHandle` 构建资源 → 新增寄存器/computed 自动出现（已验证）
+- **读写双向**：`PATCH /Sensors/{id}` 写 `access=read_write` 寄存器（物理值按 scale 反算 → 写 PCBA）；只读返回 405
+- `unit` 启发式分类（温度/转速/电压/电流）；`MetricStatus → Health` 映射；computed 与真实传感器同等暴露
 
-**验收**：`curl` Redfish、`mbpoll` 读 Modbus 从站、`snmpwalk` 遍历 OID，数值与模拟 PCBA 一致。
+**5.2 Modbus Server（tokio-modbus TCP 从站，端口 `modbus_port` 默认 1503）**
+- **四区模型 + 自动地址分配**：线圈/离散输入/保持/输入各自从 0 起按配置顺序分配；computed 进输入区（f32）；**追加式新增地址稳定**
+- **读写双向**：0x01-0x04 读（返回 metric，无 pipeline 用 raw，无数据 0xFFFF/false）；0x05/0x06/0x10 写（仅 `access=read_write` 且单字，经 WriteBroker 转发到 PCBA）；写只读/多字 → 异常
+- bit 型（bool + coil/discrete_input）支持液位/漏液等状态信号
+
+**5.3 SNMP（暂缓）**：待前两者稳定后评估 `snmp_rust_agent` / `async-snmp`，OID 映射沿用同一数据源。
+
+**配套改造**：`RegisterConfig.access`（read/read_write）、`RegisterFunction` 增 coil/discrete_input、
+`ValueType` 增 bool、`[[computed]]` 虚拟传感器（meval 多变量表达式 + 环检测）、`[endpoints]` 配置段、
+采集层写接口（`SensorSource::write_holding_register`/`write_single_coil`）、`WriteBroker` 写通道
+（协议层 → 设备轮询任务 → PCBA）、`SensorState.raw` 改 Option（computed 无 raw）。
+
+**验收（已端到端验证）**：`curl` Redfish 资源树 + PATCH 写（200/405）；
+Rust 客户端读 Modbus 输入/离散输入、写保持（OK）、写只读（IllegalFunction）；
+dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动分配地址。
+
+**5.3 SNMP（暂缓）**
+- 待 Redfish/Modbus 稳定后评估 `snmp_rust_agent` / `async-snmp`，或自实现最小 v1/v2c agent；OID 映射沿用同一数据源。
+
+**验收**：`curl` Redfish 资源树、`mbpoll` 读 Modbus 从站，数值与模拟 PCBA 一致；新增寄存器后两协议自动兼容。
 
 ## 阶段 6 — 可观测性与运维 ⏳（未开始）
 
@@ -178,7 +236,7 @@ Redfish       SNMP     Modbus
 - [x] 阶段 2 采集层
 - [x] 阶段 3 处理管道
 - [x] 阶段 4 指标存储
-- [ ] 阶段 5 输出协议
+- [x] 阶段 5 输出协议（Redfish + Modbus Server；SNMP 暂缓）
 - [ ] 阶段 6 可观测性与运维
 - [ ] 阶段 7 测试与验证
 - [ ] 阶段 8 打包发布

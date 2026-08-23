@@ -1,10 +1,9 @@
-//! Integration tests: Modbus-RTU framing over an in-memory duplex stream,
-//! using tokio-modbus' RTU client attached to a `tokio::io::duplex`.
+//! 集成测试：在内存双工流上的 Modbus-RTU 帧，
+//! 使用挂到 `tokio::io::duplex` 上的 tokio-modbus RTU 客户端。
 //!
-//! The real serial transport (tokio-serial) cannot be automated without
-//! hardware; this exercises the full RTU frame path (address, function,
-//! CRC16, exception handling) with a hand-crafted RTU server on the other
-//! side of the duplex stream.
+//! 真实串口传输（tokio-serial）无法在没有硬件的情况下自动化；
+//! 本测试在双工流另一端用手工构造的 RTU 服务器，
+//! 覆盖完整的 RTU 帧路径（地址、功能码、CRC16、异常处理）。
 
 use crc::{Crc, CRC_16_MODBUS};
 use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
@@ -37,6 +36,7 @@ fn device() -> DeviceConfig {
             value_type: ValueType::U16,
             word_order: WordOrder::Big,
             unit: None,
+            access: telemux::config::Access::Read,
         }],
     }
 }
@@ -49,19 +49,19 @@ async fn rtu_source_reads_registers() {
     let mut source = ModbusRtuSource::from_stream(client_side, &device);
 
     let server = tokio::spawn(async move {
-        // RTU request frame: unit(1) fc(1) addr(2) cnt(2) crc(2)
+        // RTU 请求帧：unit(1) fc(1) addr(2) cnt(2) crc(2)
         let mut req = [0u8; 8];
         server_side.read_exact(&mut req).await.unwrap();
-        assert_eq!(req[0], 1, "unit id");
-        assert_eq!(req[1], 0x03, "read holding registers");
+        assert_eq!(req[0], 1, "单元 id");
+        assert_eq!(req[1], 0x03, "读保持寄存器");
         assert_eq!(&req[2..6], &[0x00, 0x00, 0x00, 0x01], "addr=0 count=1");
         assert_eq!(
             crc.checksum(&req[..6]),
             u16::from_le_bytes([req[6], req[7]]),
-            "request CRC"
+            "请求 CRC"
         );
 
-        // Respond with register value 0x1234.
+        // 以寄存器值 0x1234 响应。
         let mut resp = vec![0x01, 0x03, 0x02, 0x12, 0x34];
         let checksum = crc.checksum(&resp);
         resp.extend_from_slice(&checksum.to_le_bytes());
@@ -85,7 +85,7 @@ async fn rtu_source_surfaces_exception() {
     let server = tokio::spawn(async move {
         let mut req = [0u8; 8];
         server_side.read_exact(&mut req).await.unwrap();
-        // Illegal data address (0x02) exception frame.
+        // 非法数据地址（0x02）异常帧。
         let mut resp = vec![0x01, 0x83, 0x02];
         let checksum = crc.checksum(&resp);
         resp.extend_from_slice(&checksum.to_le_bytes());
@@ -96,9 +96,9 @@ async fn rtu_source_surfaces_exception() {
     let err = source.read_samples(&device.registers).await.unwrap_err();
     match err {
         telemux::acquisition::AcquisitionError::Exception(code) => {
-            assert_eq!(u8::from(code), 0x02, "illegal data address");
+            assert_eq!(u8::from(code), 0x02, "非法数据地址");
         }
-        other => panic!("expected modbus exception, got {other:?}"),
+        other => panic!("期望 modbus 异常，实际 {other:?}"),
     }
     server.await.unwrap();
 }

@@ -1,7 +1,7 @@
-//! Integration tests: Modbus-TCP acquisition against the in-process mock PCBA.
+//! 集成测试：针对进程内模拟 PCBA 的 Modbus-TCP 采集。
 //!
-//! The mock PCBA only exists in dev builds (see `src/mock.rs`), so this file
-//! is skipped in release test runs.
+//! 模拟 PCBA 仅存在于开发构建中（见 `src/mock.rs`），因此本文件在
+//! release 测试运行中被跳过。
 
 #![cfg(any(debug_assertions, feature = "dev-dashboard"))]
 
@@ -32,6 +32,7 @@ fn reg(
         value_type,
         word_order,
         unit: None,
+        access: telemux::config::Access::Read,
     }
 }
 
@@ -41,7 +42,7 @@ fn device(registers: Vec<RegisterConfig>) -> DeviceConfig {
         transport: Transport::Tcp,
         unit_id: 1,
         host: "127.0.0.1".into(),
-        port: 0, // filled by the test after binding the mock
+        port: 0, // 测试在绑定 mock 后填充
         poll_interval_ms: 100,
         timeout_ms: 1000,
         reconnect_initial_ms: 100,
@@ -78,7 +79,7 @@ async fn tcp_source_decodes_all_value_types() {
     assert_eq!(by_name["r_u16"], 0x1234 as f64);
     assert_eq!(by_name["r_i16"], -1.0);
     assert_eq!(by_name["r_u32"], 0xDEAD_BEEFu32 as f64);
-    // Little word order on words [0xDEAD, 0xBEEF] -> 0xBEEFDEAD
+    // 对字 [0xDEAD, 0xBEEF] 的小端字序 -> 0xBEEFDEAD
     assert_eq!(by_name["r_u32l"], 0xBEEF_DEADu32 as f64);
     assert_eq!(by_name["r_f32"], 12.5);
     assert_eq!(by_name["r_in"], 200.0);
@@ -86,8 +87,8 @@ async fn tcp_source_decodes_all_value_types() {
 
 #[tokio::test]
 async fn tcp_source_recovers_after_server_restart() {
-    // Poll against a mock, kill it, restart on a new port, and expect success
-    // after reconnect (lazy reconnect is inside the source).
+    // 针对 mock 轮询，杀掉它，在新端口重启，期望重连后成功
+    // （惰性重连在数据源内部）。
     let pcba = MockPcba::fixed();
     let handle = pcba.spawn("127.0.0.1:0").await.unwrap();
 
@@ -105,16 +106,16 @@ async fn tcp_source_recovers_after_server_restart() {
     let samples = source.read_samples(&dev.registers).await.unwrap();
     assert_eq!(samples[0].raw_value, 0x1234 as f64);
 
-    // Simulate a dead device: the mock handle's task is aborted on drop.
+    // 模拟设备死亡：mock 句柄的任务在 drop 时被 abort。
     drop(handle);
     assert!(source.read_samples(&dev.registers).await.is_err());
-    assert!(source.read_samples(&dev.registers).await.is_err()); // still down
+    assert!(source.read_samples(&dev.registers).await.is_err()); // 仍然宕机
     let pcba2 = MockPcba::fixed();
     let handle2 = pcba2.spawn("127.0.0.1:0").await.unwrap();
     dev.port = handle2.addr.port();
     drop(source);
 
-    // Recreate the source (as the scheduler would after backoff) and poll.
+    // 重建数据源（如同调度器退避后的做法）并轮询。
     let mut source = create_source(&dev).await.unwrap();
     let samples = source.read_samples(&dev.registers).await.unwrap();
     assert_eq!(samples[0].raw_value, 0x1234 as f64);
@@ -140,35 +141,37 @@ async fn manager_streams_samples_from_mock() {
         general: Default::default(),
         devices: vec![dev],
         pipelines: vec![],
+        computed: vec![],
+        endpoints: Default::default(),
     };
     let handle = telemux::config_handle::ConfigHandle::new(cfg, "unused.toml".into());
 
     let (tx, mut rx) = mpsc::channel::<Vec<RawSample>>(16);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let manager = AcquisitionManager::new(&handle);
-    let tasks = manager.spawn(handle.clone(), tx.clone(), shutdown_rx);
+    let spawned = manager.spawn(handle.clone(), tx.clone(), shutdown_rx);
     drop(tx);
 
-    // First tick fires immediately; dynamic value: holding[0] = 250 + (snapshot % 50),
-    // snapshot starts at 1 -> 251.
+    // 第一个 tick 立即触发；动态值：holding[0] = 250 + (snapshot % 50)，
+    // snapshot 从 1 开始 -> 251。
     let batch = tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timeout waiting for first sample batch")
-        .expect("channel closed before any batch");
+        .expect("等待第一批样本超时")
+        .expect("任何批次到达前通道已关闭");
     assert_eq!(batch.len(), 1);
     assert_eq!(batch[0].sensor_id.as_str(), "s.0");
     assert_eq!(batch[0].raw_value, 251.0);
 
-    // Second poll should arrive eventually with a different value.
+    // 第二次轮询应最终到达且值不同。
     let batch = tokio::time::timeout(Duration::from_secs(5), rx.recv())
         .await
-        .expect("timeout waiting for second sample batch")
-        .expect("channel closed");
+        .expect("等待第二批样本超时")
+        .expect("通道已关闭");
     assert!(batch[0].raw_value >= 250.0 && batch[0].raw_value < 300.0);
 
     shutdown_tx.send(true).unwrap();
-    for t in tasks {
+    for t in spawned.tasks {
         t.await.unwrap();
     }
-    assert!(rx.recv().await.is_none(), "channel should close after shutdown");
+    assert!(rx.recv().await.is_none(), "关闭后通道应关闭");
 }

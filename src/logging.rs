@@ -1,13 +1,13 @@
-//! Logging setup on top of `tracing` + `tracing-subscriber`.
+//! 基于 `tracing` + `tracing-subscriber` 的日志设置。
 //!
-//! Uses `RUST_LOG` when set (via `EnvFilter`), otherwise the level passed in.
-//! `tracing-log` bridges any `log`-based output (e.g. from tokio-modbus) into
-//! the tracing pipeline.
+//! 设置了 `RUST_LOG` 时使用它（通过 `EnvFilter`），否则使用传入的日志级别。
+//! `tracing-log` 将任何基于 `log` 的输出（例如来自 tokio-modbus）桥接到
+//! tracing 管道中。
 
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-/// Install the tracing subscriber (format: text to stdout, ansi colors on tty).
+/// 安装 tracing 订阅器（格式：文本输出到 stdout，tty 上使用 ansi 颜色）。
 pub fn init(
     max_level: Level,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -17,7 +17,7 @@ pub fn init(
         .try_init()
 }
 
-/// Parse a level name (used by the CLI `--log-level` flag).
+/// 解析日志级别名称（供 CLI `--log-level` 参数使用）。
 pub fn level_from_str(s: &str) -> Option<Level> {
     match s.to_ascii_lowercase().as_str() {
         "trace" => Some(Level::TRACE),

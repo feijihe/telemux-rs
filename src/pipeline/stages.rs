@@ -1,4 +1,4 @@
-//! Built-in pipeline stages.
+//! 内置管道阶段。
 
 use std::collections::VecDeque;
 use std::str::FromStr;
@@ -8,7 +8,7 @@ use crate::domain::MetricStatus;
 
 use super::{PipelineError, SampleContext, Stage};
 
-/// Linear conversion: `value = value * scale + offset`, optionally updating the unit.
+/// 线性换算：`value = value * scale + offset`，可选更新单位。
 pub struct ScaleStage {
     scale: f64,
     offset: f64,
@@ -31,7 +31,7 @@ impl Stage for ScaleStage {
     }
 }
 
-/// Sliding window average filter.
+/// 滑动窗口平均滤波器。
 pub struct SlidingAverageStage {
     window: usize,
     buffer: VecDeque<f64>,
@@ -57,7 +57,7 @@ impl Stage for SlidingAverageStage {
     }
 }
 
-/// Sliding window median filter (average of the two middles for even windows).
+/// 滑动窗口中值滤波器（偶数窗口取两个中间值的平均）。
 pub struct MedianStage {
     window: usize,
     buffer: VecDeque<f64>,
@@ -81,7 +81,7 @@ impl Stage for MedianStage {
         let mut sorted: Vec<f64> = self.buffer.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let mid = sorted.len() / 2;
-        ctx.value = if sorted.len() % 2 == 0 {
+        ctx.value = if sorted.len().is_multiple_of(2) {
             (sorted[mid - 1] + sorted[mid]) / 2.0
         } else {
             sorted[mid]
@@ -90,12 +90,12 @@ impl Stage for MedianStage {
     }
 }
 
-/// Math expression over the current value; the variable is `v`
-/// (e.g. `"(v - 273.15) * 10"`).
+/// 基于当前值的数学表达式；变量为 `v`
+/// （如 `"(v - 273.15) * 10"`）。
 ///
-/// Stores the parsed [`meval::Expr`] and re-binds on every sample: meval's
-/// bound closures are not `Send` (they hold an `Rc` function table), which is
-/// fine since pipelines run single-threaded.
+/// 保存解析后的 [`meval::Expr`]，每个样本重新绑定：meval 的
+/// 绑定闭包不是 `Send`（持有 `Rc` 函数表），这没问题，
+/// 因为管道是单线程运行的。
 pub struct MathStage {
     expr: meval::Expr,
 }
@@ -120,7 +120,7 @@ impl Stage for MathStage {
     }
 }
 
-/// Threshold check: sets the metric status. Critical bounds beat warning bounds.
+/// 阈值检查：设置指标状态。critical 边界优先于 warning 边界。
 pub struct ThresholdStage {
     low_warning: Option<f64>,
     high_warning: Option<f64>,
@@ -148,26 +148,26 @@ impl Stage for ThresholdStage {
     fn process(&mut self, ctx: &mut SampleContext) -> Result<(), PipelineError> {
         let v = ctx.value;
         let mut status = MetricStatus::Normal;
-        if let Some(bound) = self.low_critical {
-            if v < bound {
-                status = MetricStatus::Critical;
-            }
+        if let Some(bound) = self.low_critical
+            && v < bound
+        {
+            status = MetricStatus::Critical;
         }
-        if let Some(bound) = self.high_critical {
-            if v > bound {
-                status = MetricStatus::Critical;
-            }
+        if let Some(bound) = self.high_critical
+            && v > bound
+        {
+            status = MetricStatus::Critical;
         }
         if status != MetricStatus::Critical {
-            if let Some(bound) = self.low_warning {
-                if v < bound {
-                    status = MetricStatus::Warning;
-                }
+            if let Some(bound) = self.low_warning
+                && v < bound
+            {
+                status = MetricStatus::Warning;
             }
-            if let Some(bound) = self.high_warning {
-                if v > bound {
-                    status = MetricStatus::Warning;
-                }
+            if let Some(bound) = self.high_warning
+                && v > bound
+            {
+                status = MetricStatus::Warning;
             }
         }
         ctx.status = status;
@@ -175,7 +175,7 @@ impl Stage for ThresholdStage {
     }
 }
 
-/// Windowed statistics (min / max / avg), replacing the value with the window stat.
+/// 窗口统计（min / max / avg），以窗口统计值替换当前值。
 pub struct AggregateStage {
     window: usize,
     mode: AggregateMode,

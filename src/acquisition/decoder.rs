@@ -1,10 +1,10 @@
-//! Decode raw 16-bit words into typed values, per register configuration.
+//! 按寄存器配置将原始 16 位字解码为类型化值。
 
 use crate::acquisition::AcquisitionError;
 use crate::config::{RegisterConfig, ValueType, WordOrder};
 use crate::domain::{RawSample, SensorId};
 
-/// Decode `words` (from a single register read) into the configured numeric value.
+/// 将 `words`（来自一次寄存器读取）解码为配置的数值。
 pub fn decode_words(words: &[u16], value_type: ValueType, word_order: WordOrder) -> f64 {
     match value_type {
         ValueType::U16 => f64::from(words[0]),
@@ -12,11 +12,14 @@ pub fn decode_words(words: &[u16], value_type: ValueType, word_order: WordOrder)
         ValueType::U32 => f64::from(combine(words, word_order)),
         ValueType::I32 => f64::from(combine(words, word_order) as i32),
         ValueType::F32 => f64::from(f32::from_bits(combine(words, word_order))),
+        // Bool 寄存器通常走 `raw_sample_bool`（coil/离散输入）；
+        // 此回退将非零字视为 true。
+        ValueType::Bool => f64::from(u16::from(words[0] != 0)),
     }
 }
 
-/// Combine two registers into a 32-bit word.
-/// `Big`: first register is the high word. `Little`: first register is the low word.
+/// 将两个寄存器组合为一个 32 位字。
+/// `Big`：第一个寄存器是高字。`Little`：第一个寄存器是低字。
 fn combine(words: &[u16], order: WordOrder) -> u32 {
     match order {
         WordOrder::Big => (u32::from(words[0]) << 16) | u32::from(words[1]),
@@ -24,8 +27,8 @@ fn combine(words: &[u16], order: WordOrder) -> u32 {
     }
 }
 
-/// Build a [`RawSample`] from the words returned for one register group.
-/// Validates the response length (a broken/evil slave must not panic us).
+/// 从一组寄存器返回的字构建 [`RawSample`]。
+/// 校验响应长度（故障或恶意的从站不得导致 panic）。
 pub fn raw_sample(
     device: &str,
     reg: &RegisterConfig,
@@ -48,6 +51,31 @@ pub fn raw_sample(
         sensor_id: SensorId(reg.sensor_id.clone()),
         name: reg.name.clone(),
         raw_value: decode_words(words, reg.value_type, reg.word_order),
+        unit: reg.unit.clone(),
+        timestamp: RawSample::now(),
+    })
+}
+
+/// 从单个 coil / 离散输入 bit 构建 [`RawSample`]。
+pub fn raw_sample_bool(
+    device: &str,
+    reg: &RegisterConfig,
+    value: bool,
+) -> Result<RawSample, AcquisitionError> {
+    if reg.value_type != ValueType::Bool {
+        return Err(AcquisitionError::Register {
+            device: device.to_string(),
+            name: reg.name.clone(),
+            message: format!(
+                "register is not a bool register (value_type {:?})",
+                reg.value_type
+            ),
+        });
+    }
+    Ok(RawSample {
+        sensor_id: SensorId(reg.sensor_id.clone()),
+        name: reg.name.clone(),
+        raw_value: if value { 1.0 } else { 0.0 },
         unit: reg.unit.clone(),
         timestamp: RawSample::now(),
     })
@@ -120,6 +148,7 @@ mod tests {
             value_type: ValueType::F32,
             word_order: WordOrder::Big,
             unit: None,
+            access: crate::config::Access::Read,
         };
         assert!(raw_sample("dev", &reg, &[0x4148]).is_err());
     }

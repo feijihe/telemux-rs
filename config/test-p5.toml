@@ -1,0 +1,156 @@
+[general]
+log_level = "info"
+
+[[devices]]
+name = "pcba-01"
+transport = "tcp"
+unit_id = 1
+host = "127.0.0.1"
+port = 1502
+poll_interval_ms = 500
+timeout_ms = 500
+reconnect_initial_ms = 1000
+reconnect_max_ms = 30000
+
+[[devices.registers]]
+name = "fan1_duty"
+sensor_id = "pcba-01.fan1_duty"
+function = "holding"
+address = 0
+value_type = "u16"
+word_order = "big"
+unit = "%"
+access = "read_write"
+
+[[devices.registers]]
+name = "fan1_speed"
+sensor_id = "pcba-01.fan1_speed"
+function = "holding"
+address = 1
+value_type = "u16"
+word_order = "big"
+unit = "RPM"
+access = "read"
+
+[[devices.registers]]
+name = "vcore"
+sensor_id = "pcba-01.vcore"
+function = "holding"
+address = 4
+count = 2
+value_type = "f32"
+word_order = "big"
+unit = "V"
+access = "read"
+
+[[devices.registers]]
+name = "vin"
+sensor_id = "pcba-01.vin"
+function = "input"
+address = 0
+value_type = "u16"
+word_order = "big"
+unit = "mV"
+access = "read"
+
+[[devices.registers]]
+name = "iin"
+sensor_id = "pcba-01.iin"
+function = "input"
+address = 1
+value_type = "u16"
+word_order = "big"
+unit = "mA"
+access = "read"
+
+[[devices.registers]]
+name = "leak_detect"
+sensor_id = "pcba-01.leak"
+function = "discrete_input"
+address = 0
+value_type = "bool"
+word_order = "big"
+unit = "leak"
+access = "read"
+
+[[devices.registers]]
+name = "pump1_enable"
+sensor_id = "pcba-01.pump1_enable"
+function = "coil"
+address = 0
+value_type = "bool"
+word_order = "big"
+unit = "enable"
+access = "read_write"
+
+[[devices.registers]]
+name = "new_flow"
+sensor_id = "pcba-01.flow"
+function = "input"
+address = 9
+value_type = "u16"
+word_order = "big"
+unit = "L/min"
+access = "read"
+
+[[pipeline]]
+sensor_id = "pcba-01.fan1_duty"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+offset = 0.0
+unit = "%"
+
+[[pipeline]]
+sensor_id = "pcba-01.fan1_speed"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+offset = 0.0
+unit = "RPM"
+
+[[pipeline]]
+sensor_id = "pcba-01.vcore"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 1.0
+offset = 0.0
+unit = "V"
+
+[[pipeline]]
+sensor_id = "pcba-01.vin"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 0.001
+offset = 0.0
+unit = "V"
+
+[[pipeline]]
+sensor_id = "pcba-01.iin"
+
+[[pipeline.stages]]
+type = "scale"
+scale = 0.001
+offset = 0.0
+unit = "A"
+
+[[computed]]
+sensor_id = "pcba-01.ratio"
+name = "vin_vcore_ratio"
+unit = "ratio"
+expression = "a / b"
+
+[computed.inputs]
+a = "pcba-01.vin"
+b = "pcba-01.vcore"
+
+[endpoints]
+redfish_enabled = true
+redfish_port = 8000
+modbus_enabled = true
+modbus_port = 1503
+modbus_unit_id = 1

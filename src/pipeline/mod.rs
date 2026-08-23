@@ -1,8 +1,7 @@
-//! Processing pipeline: converts raw samples into processed metrics.
+//! 处理管道：将原始样本转换为处理后的指标。
 //!
-//! A pipeline is an ordered chain of [`Stage`]s applied to a
-//! [`SampleContext`]. Stages are configured via `[[pipeline]]` TOML sections
-//! (see [`StageConfig`](crate::config::StageConfig)).
+//! 管道是对 [`SampleContext`] 应用的一组有序 [`Stage`]。
+//! 阶段通过 `[[pipeline]]` TOML 段配置（见 [`StageConfig`](crate::config::StageConfig)）。
 
 pub mod stages;
 
@@ -14,7 +13,7 @@ use crate::config::{Config, PipelineConfig, StageConfig};
 use crate::config_handle::ConfigHandle;
 use crate::domain::{Metric, MetricStatus, RawSample, SensorId};
 
-/// Pipeline processing error.
+/// 管道处理错误。
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
     #[error("stage `{stage}`: {message}")]
@@ -28,7 +27,7 @@ pub enum PipelineError {
     Empty,
 }
 
-/// Mutable sample context flowing through the pipeline stages.
+/// 流经管道阶段的可变样本上下文。
 pub struct SampleContext {
     pub sensor_id: SensorId,
     pub name: String,
@@ -45,8 +44,8 @@ impl SampleContext {
             name: sample.name,
             value: sample.raw_value,
             unit: sample.unit,
-            // Default to Normal: without a threshold stage there is no reason
-            // to flag the metric. Threshold stages override this.
+            // 默认 Normal：没有阈值阶段就没有理由标记指标。
+            // 阈值阶段会覆盖此值。
             status: MetricStatus::Normal,
             timestamp: sample.timestamp,
         }
@@ -63,17 +62,16 @@ impl SampleContext {
     }
 }
 
-/// A processing stage: transforms the sample context in place.
-/// May hold state (filters, aggregates); `&mut self` allows that.
+/// 处理阶段：就地变换样本上下文。
+/// 可持有状态（滤波器、聚合器）；`&mut self` 即为此服务。
 ///
-/// Deliberately **not** `Send`: pipelines run single-threaded inside the
-/// acquisition consumer (a current-thread runtime), and some stages (e.g.
-/// meval math expressions) are not thread-safe.
+/// 刻意**不**实现 `Send`：管道在采集消费者（current-thread runtime）内
+/// 单线程运行，且某些阶段（如 meval 数学表达式）不是线程安全的。
 pub trait Stage {
     fn process(&mut self, ctx: &mut SampleContext) -> Result<(), PipelineError>;
 }
 
-/// A configured pipeline: one per sensor.
+/// 配置好的管道：每传感器一个。
 pub struct Pipeline {
     pub sensor_id: SensorId,
     stages: Vec<Box<dyn Stage>>,
@@ -95,7 +93,7 @@ impl Pipeline {
         self.stages.is_empty()
     }
 
-    /// Run the chain on one raw sample, producing a metric.
+    /// 对单个原始样本运行整个链，产出一个指标。
     pub fn process(&mut self, sample: RawSample) -> Result<Metric, PipelineError> {
         if self.stages.is_empty() {
             return Err(PipelineError::Empty);
@@ -108,7 +106,7 @@ impl Pipeline {
     }
 }
 
-/// Validate a stage configuration (used by config validation and building).
+/// 校验阶段配置（供配置校验与构建使用）。
 pub fn validate_stage(config: &StageConfig) -> Result<(), String> {
     match config {
         StageConfig::Scale { scale, .. } => {
@@ -143,22 +141,22 @@ pub fn validate_stage(config: &StageConfig) -> Result<(), String> {
             {
                 return Err("threshold needs at least one bound".to_string());
             }
-            if let (Some(lo), Some(hi)) = (low_critical, high_critical) {
-                if lo > hi {
-                    return Err("low_critical must be <= high_critical".to_string());
-                }
+            if let (Some(lo), Some(hi)) = (low_critical, high_critical)
+                && lo > hi
+            {
+                return Err("low_critical must be <= high_critical".to_string());
             }
-            if let (Some(lo), Some(hi)) = (low_warning, high_warning) {
-                if lo > hi {
-                    return Err("low_warning must be <= high_warning".to_string());
-                }
+            if let (Some(lo), Some(hi)) = (low_warning, high_warning)
+                && lo > hi
+            {
+                return Err("low_warning must be <= high_warning".to_string());
             }
         }
     }
     Ok(())
 }
 
-/// Build one stage from its configuration.
+/// 从配置构建一个阶段。
 pub fn build_stage(config: &StageConfig) -> Result<Box<dyn Stage>, String> {
     validate_stage(config)?;
     Ok(match config {
@@ -189,8 +187,8 @@ pub fn build_stage(config: &StageConfig) -> Result<Box<dyn Stage>, String> {
     })
 }
 
-/// Build all pipelines from configuration. Config must already be validated,
-/// so a failing build here is a programming error.
+/// 从配置构建所有管道。配置必须已通过校验，
+/// 因此此处构建失败属于编程错误。
 pub fn build_pipelines(configs: &[PipelineConfig]) -> HashMap<SensorId, Pipeline> {
     configs
         .iter()
@@ -201,8 +199,8 @@ pub fn build_pipelines(configs: &[PipelineConfig]) -> HashMap<SensorId, Pipeline
         .collect()
 }
 
-/// Cache of built pipelines, rebuilt when the runtime config revision changes
-/// (registers/pipelines added via the dev dashboard take effect immediately).
+/// 已构建管道的缓存，运行时配置版本变化时重建
+/// （通过开发仪表盘添加的寄存器/管道立即生效）。
 pub struct PipelinesCache {
     revision: u64,
     pipelines: HashMap<SensorId, Pipeline>,
@@ -216,8 +214,8 @@ impl PipelinesCache {
         }
     }
 
-    /// Rebuild the pipelines if the config revision changed since the last
-    /// refresh. Cheap no-op otherwise (no per-sample parsing).
+    /// 自上次刷新以来配置版本变化时重建管道。
+    /// 否则为廉价空操作（不做逐样本解析）。
     pub fn refresh(&mut self, handle: &ConfigHandle) {
         let rev = handle.revision();
         if rev != self.revision {
@@ -244,7 +242,7 @@ impl PipelinesCache {
     }
 }
 
-/// Human-readable formula for one stage (generated from config, not handwritten).
+/// 单个阶段的人类可读公式（由配置生成，非手写）。
 pub fn describe_stage(config: &StageConfig) -> String {
     match config {
         StageConfig::Scale {
@@ -304,7 +302,7 @@ pub fn describe_stage(config: &StageConfig) -> String {
     }
 }
 
-/// Human-readable formula for a whole pipeline (stages joined by ` → `).
+/// 整个管道的人类可读公式（阶段以 ` → ` 连接）。
 pub fn describe_pipeline(config: &PipelineConfig) -> String {
     config
         .stages
@@ -357,7 +355,7 @@ mod tests {
             s.process(&mut c).unwrap();
             assert_eq!(c.value, expected);
         }
-        // even window: average of two middles
+        // 偶数窗口：取两个中间值的平均
         let mut s = stages::MedianStage::new(2);
         let mut c = ctx(1.0);
         s.process(&mut c).unwrap();
@@ -414,10 +412,10 @@ mod tests {
             let mut c = ctx(v);
             s.process(&mut c).unwrap();
         }
-        // After four samples the window holds [5, 3, 2].
+        // 四个样本后窗口持有 [5, 3, 2]。
         let mut c = ctx(0.0);
         s.process(&mut c).unwrap();
-        assert_eq!(c.value, 3.0); // max of [3, 2, 0]
+        assert_eq!(c.value, 3.0); // [3, 2, 0] 的最大值
 
         let mut s = stages::AggregateStage::new(2, AggregateMode::Avg);
         let mut c = ctx(10.0);

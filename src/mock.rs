@@ -1,12 +1,12 @@
-//! Mock PCBA Modbus-TCP slave for development and integration tests,
-//! implemented on top of the `tokio-modbus` TCP server skeleton.
+//! 用于开发和集成测试的模拟 PCBA Modbus-TCP 从站，
+//! 基于 `tokio-modbus` 的 TCP 服务器骨架实现。
 //!
-//! - [`MockPcba::fixed`]: deterministic values, for exact assertions in tests.
-//! - [`MockPcba::dynamic`]: values change with every read request, for manual
-//!   demos against `config/example.toml`.
+//! - [`MockPcba::fixed`]：确定性值，供测试中的精确断言使用。
+//! - [`MockPcba::dynamic`]：每次读取请求值都变化，供对照
+//!   `config/example.toml` 的手动演示使用。
 //!
-//! Supports read holding/input registers plus write single/multiple echoes;
-//! anything else gets an illegal-function exception.
+//! 支持读取保持/输入寄存器以及写入单/多寄存器回显；
+//! 其他请求返回 illegal-function 异常。
 
 use std::future::{self, Ready};
 use std::net::SocketAddr;
@@ -18,24 +18,26 @@ use tokio_modbus::server::tcp::{accept_tcp_connection, Server as TcpModbusServer
 use tokio_modbus::server::Service;
 use tokio_modbus::{ExceptionCode, Request, Response};
 
-/// In-memory Modbus-TCP slave.
+/// 内存中的 Modbus-TCP 从站。
 #[derive(Clone)]
 pub struct MockPcba {
-    /// holding register map, indexed by address
+    /// 保持寄存器映射，按地址索引
     holding: Arc<Mutex<Vec<u16>>>,
-    /// input register map, indexed by address
+    /// 输入寄存器映射，按地址索引
     input: Arc<Mutex<Vec<u16>>>,
-    /// generate changing values on each read (ignores the maps)
+    /// 每次读取生成变化的值（忽略映射）
     dynamic: bool,
-    /// increments per read request; drives dynamic values
+    /// 每次读取请求递增；驱动动态值
     request_count: Arc<AtomicU64>,
+    /// 线圈映射（可写入的 bit）
+    coils: Arc<Mutex<Vec<bool>>>,
 }
 
 impl MockPcba {
-    /// Deterministic register map:
+    /// 确定性寄存器映射：
     /// holding[0]=0x1234 (u16), holding[1]=0xFFFF (i16=-1),
     /// holding[2..4]=0xDEADBEEF (u32 big), holding[4..6]=12.5 (f32 big),
-    /// input[0]=200, input[1]=0xFFFF (i16=-1).
+    /// input[0]=200, input[1]=0xFFFF (i16=-1)。
     pub fn fixed() -> Self {
         let mut holding = vec![0u16; 8];
         holding[0] = 0x1234;
@@ -50,10 +52,10 @@ impl MockPcba {
         Self::from_maps(holding, input)
     }
 
-    /// Dynamic register map matching `config/example.toml`:
-    /// holding[0]=cpu temp raw 250..299, holding[1]=fan speed raw,
-    /// holding[2..4]=uptime ticks (u32), holding[4..6]=vcore 12.5 (f32),
-    /// input[0]=vin raw, input[1]=iin raw.
+    /// 与 `config/example.toml` 匹配的动态寄存器映射：
+    /// holding[0]=cpu 温度原始值 250..299, holding[1]=风扇转速原始值,
+    /// holding[2..4]=运行时长 ticks (u32), holding[4..6]=vcore 12.5 (f32),
+    /// input[0]=vin 原始值, input[1]=iin 原始值。
     pub fn dynamic() -> Self {
         Self::from_maps(vec![0u16; 8], vec![0u16; 4]).with_dynamic()
     }
@@ -64,6 +66,7 @@ impl MockPcba {
             input: Arc::new(Mutex::new(input)),
             dynamic: false,
             request_count: Arc::new(AtomicU64::new(0)),
+            coils: Arc::new(Mutex::new(vec![false; 8])),
         }
     }
 
@@ -72,8 +75,8 @@ impl MockPcba {
         self
     }
 
-    /// Bind and serve. `bind` is e.g. "127.0.0.1:0" (ephemeral port) —
-    /// the actual address is in [`MockHandle::addr`].
+    /// 绑定并服务。`bind` 例如 "127.0.0.1:0"（临时端口）——
+    /// 实际地址在 [`MockHandle::addr`] 中。
     pub async fn spawn(&self, bind: &str) -> std::io::Result<MockHandle> {
         let listener = TcpListener::bind(bind).await?;
         let addr = listener.local_addr()?;
@@ -104,7 +107,7 @@ impl MockPcba {
     }
 
     fn words(&self, holding: bool, addr: u16, cnt: u16) -> Vec<u16> {
-        // One snapshot per request so multi-register values stay consistent.
+        // 每个请求一次快照，保证多寄存器值一致。
         let snapshot = self.request_count.fetch_add(1, Ordering::Relaxed) + 1;
         if self.dynamic {
             (0..cnt)
@@ -125,6 +128,40 @@ impl MockPcba {
                 .collect()
         }
     }
+
+    fn bits(&self, coils: bool, addr: u16, cnt: u16) -> Vec<bool> {
+        let map = if coils {
+            self.coils.lock().expect("mock map poisoned")
+        } else {
+            // 离散输入：固定 bit 模式（地址 0 = true，其余 false）
+            return (0..cnt)
+                .map(|i| addr.wrapping_add(i) == 0)
+                .collect();
+        };
+        (0..cnt)
+            .map(|i| {
+                map.get(usize::from(addr.wrapping_add(i)))
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    fn write_holding(&self, addr: u16, word: u16) {
+        let mut map = self.holding.lock().expect("mock map poisoned");
+        let i = usize::from(addr);
+        if i < map.len() {
+            map[i] = word;
+        }
+    }
+
+    fn write_coil(&self, addr: u16, value: bool) {
+        let mut map = self.coils.lock().expect("mock map poisoned");
+        let i = usize::from(addr);
+        if i < map.len() {
+            map[i] = value;
+        }
+    }
 }
 
 impl Service for MockPcba {
@@ -141,9 +178,25 @@ impl Service for MockPcba {
             Request::ReadInputRegisters(addr, cnt) => {
                 Response::ReadInputRegisters(self.words(false, addr, cnt))
             }
-            Request::WriteSingleRegister(addr, word) => Response::WriteSingleRegister(addr, word),
+            Request::ReadCoils(addr, cnt) => {
+                Response::ReadCoils(self.bits(true, addr, cnt))
+            }
+            Request::ReadDiscreteInputs(addr, cnt) => {
+                Response::ReadDiscreteInputs(self.bits(false, addr, cnt))
+            }
+            Request::WriteSingleRegister(addr, word) => {
+                self.write_holding(addr, word);
+                Response::WriteSingleRegister(addr, word)
+            }
             Request::WriteMultipleRegisters(addr, words) => {
+                for (i, w) in words.iter().enumerate() {
+                    self.write_holding(addr.wrapping_add(i as u16), *w);
+                }
                 Response::WriteMultipleRegisters(addr, words.len() as u16)
+            }
+            Request::WriteSingleCoil(addr, coil) => {
+                self.write_coil(addr, coil);
+                Response::WriteSingleCoil(addr, coil)
             }
             _ => return future::ready(Err(ExceptionCode::IllegalFunction)),
         };
@@ -151,8 +204,8 @@ impl Service for MockPcba {
     }
 }
 
-/// A running mock server; aborting it also cancels all active connections
-/// (the tokio-modbus server uses a cancellation token for spawned tasks).
+/// 一个正在运行的模拟服务器；abort 它也会取消所有活动连接
+/// （tokio-modbus 服务器对派生任务使用取消令牌）。
 pub struct MockHandle {
     pub addr: SocketAddr,
     task: tokio::task::JoinHandle<()>,
@@ -164,17 +217,17 @@ impl Drop for MockHandle {
     }
 }
 
-/// Values for the dynamic map, keyed on request snapshot so they evolve over time.
+/// 动态映射的值，基于请求快照，随时间演化。
 fn dynamic_value(holding: bool, addr: u16, snapshot: u64) -> u16 {
     match (holding, addr) {
-        (true, 0) => (250 + (snapshot % 50)) as u16,   // cpu temp raw 250..299
-        (true, 1) => (3200 + (snapshot % 200)) as u16, // fan speed raw
-        (true, 2) => ((snapshot >> 16) & 0xFFFF) as u16, // uptime ticks, high word
-        (true, 3) => (snapshot & 0xFFFF) as u16,       // uptime ticks, low word
-        (true, 4) => (12.5f32.to_bits() >> 16) as u16, // vcore, high word
-        (true, 5) => (12.5f32.to_bits() & 0xFFFF) as u16, // vcore, low word
-        (false, 0) => (12500 + (snapshot % 10)) as u16, // vin raw (mV)
-        (false, 1) => (900 + (snapshot % 20)) as u16,  // iin raw (mA)
+        (true, 0) => (250 + (snapshot % 50)) as u16,   // cpu 温度原始值 250..299
+        (true, 1) => (3200 + (snapshot % 200)) as u16, // 风扇转速原始值
+        (true, 2) => ((snapshot >> 16) & 0xFFFF) as u16, // 运行时长 ticks，高字
+        (true, 3) => (snapshot & 0xFFFF) as u16,       // 运行时长 ticks，低字
+        (true, 4) => (12.5f32.to_bits() >> 16) as u16, // vcore，高字
+        (true, 5) => (12.5f32.to_bits() & 0xFFFF) as u16, // vcore，低字
+        (false, 0) => (12500 + (snapshot % 10)) as u16, // vin 原始值 (mV)
+        (false, 1) => (900 + (snapshot % 20)) as u16,  // iin 原始值 (mA)
         _ => 0,
     }
 }

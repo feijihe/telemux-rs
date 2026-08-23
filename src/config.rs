@@ -1,27 +1,72 @@
-//! TOML-driven configuration: devices, registers, polling behavior.
+//! TOML 驱动的配置：设备、寄存器、轮询行为。
 //!
-//! Pipeline / endpoints / alerts sections are added in later phases; unknown
-//! fields are ignored for forward compatibility.
+//! 管道/端点/告警段在后续阶段添加；未知字段会被忽略以保证向前兼容。
 
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Top-level configuration, deserialized from TOML.
+/// 顶层配置，从 TOML 反序列化。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub general: GeneralConfig,
     #[serde(default)]
     pub devices: Vec<DeviceConfig>,
-    /// Per-sensor processing pipelines (phase 3). TOML key: `[[pipeline]]`.
+    /// 每传感器处理管道（阶段 3）。TOML 键：`[[pipeline]]`。
     #[serde(default, rename = "pipeline")]
     pub pipelines: Vec<PipelineConfig>,
+    /// 由其他传感器计算出的虚拟传感器（阶段 5）。TOML 键：`[[computed]]`。
+    #[serde(default, rename = "computed")]
+    pub computed: Vec<ComputedConfig>,
+    /// 协议端点（阶段 5）：Redfish / Modbus 服务器。
+    #[serde(default)]
+    pub endpoints: EndpointsConfig,
+}
+
+/// 协议端点设置（阶段 5）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct EndpointsConfig {
+    #[serde(default = "default_true")]
+    pub redfish_enabled: bool,
+    #[serde(default = "default_redfish_port")]
+    pub redfish_port: u16,
+    #[serde(default = "default_true")]
+    pub modbus_enabled: bool,
+    #[serde(default = "default_modbus_port")]
+    pub modbus_port: u16,
+    #[serde(default = "default_modbus_unit_id")]
+    pub modbus_unit_id: u8,
+}
+
+impl Default for EndpointsConfig {
+    fn default() -> Self {
+        Self {
+            redfish_enabled: default_true(),
+            redfish_port: default_redfish_port(),
+            modbus_enabled: default_true(),
+            modbus_port: default_modbus_port(),
+            modbus_unit_id: default_modbus_unit_id(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_redfish_port() -> u16 {
+    8000
+}
+fn default_modbus_port() -> u16 {
+    1503
+}
+fn default_modbus_unit_id() -> u8 {
+    1
 }
 
 impl Config {
-    /// Load and validate a config file.
+    /// 加载并校验配置文件。
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("read config file `{}`", path.display()))?;
@@ -32,7 +77,7 @@ impl Config {
         Ok(cfg)
     }
 
-    /// Semantic validation beyond TOML typing.
+    /// 超出 TOML 类型检查的语义校验。
     pub fn validate(&self) -> Result<()> {
         let mut seen_devices = std::collections::HashSet::new();
         let mut seen_sensors = std::collections::HashSet::new();
@@ -98,7 +143,7 @@ impl Config {
                 bail!("device `{}`: too many registers ({}), max 256", device.name, device.registers.len());
             }
 
-            // Registers: unique names, unique sensor ids, no overlapping ranges.
+            // 寄存器：名称唯一、sensor_id 唯一、地址范围不重叠。
             let mut seen_reg_names = std::collections::HashSet::new();
             let mut ranges: Vec<(RegisterFunction, u16, u16)> = Vec::new();
             for reg in &device.registers {
@@ -113,6 +158,21 @@ impl Config {
                     bail!("duplicate sensor_id `{}` (must be unique gateway-wide)", reg.sensor_id);
                 }
                 known_sensors.insert(reg.sensor_id.as_str());
+                // bit 区（coil/discrete_input）必须用 bool；非 bit 区不允许 bool
+                // 之外的类型出现在 bit 区
+                if reg.function.is_bit() && reg.value_type != ValueType::Bool {
+                    bail!(
+                        "device `{}` register `{}`: function {:?} requires value_type = \"bool\"",
+                        device.name, reg.name, reg.function
+                    );
+                }
+                // read_write 仅允许在可写区（holding/coil）
+                if reg.access == Access::ReadWrite && !reg.function.is_writable() {
+                    bail!(
+                        "device `{}` register `{}`: access = \"read_write\" is only allowed for holding/coil registers",
+                        device.name, reg.name
+                    );
+                }
                 let width = reg.value_type.register_count();
                 let eff_count = reg.effective_count();
                 if eff_count != width {
@@ -144,8 +204,8 @@ impl Config {
             }
         }
 
-        // Pipelines: sensor_id must reference a known register, be unique,
-        // and contain valid stage parameters.
+        // 管道：sensor_id 必须引用已知寄存器、必须唯一，
+        // 且包含有效的阶段参数。
         let mut seen_pipelines: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for pipe in &self.pipelines {
             if !known_sensors.contains(pipe.sensor_id.as_str()) {
@@ -171,19 +231,94 @@ impl Config {
                     .map_err(|e| anyhow::anyhow!("pipeline for `{}`: {e}", pipe.sensor_id))?;
             }
         }
+
+        // 计算（虚拟传感器）：id 唯一、引用的输入存在、
+        // 表达式可解析且其变量是输入的子集、无环。
+        let mut computed_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for c in &self.computed {
+            if !seen_sensors.insert(c.sensor_id.as_str()) {
+                bail!(
+                    "duplicate sensor_id `{}` (computed must not collide with registers)",
+                    c.sensor_id
+                );
+            }
+            if !computed_ids.insert(c.sensor_id.as_str()) {
+                bail!("duplicate computed sensor_id `{}`", c.sensor_id);
+            }
+            if c.name.is_empty() {
+                bail!("computed `{}`: name is required", c.sensor_id);
+            }
+            if c.inputs.is_empty() {
+                bail!("computed `{}`: at least one input is required", c.sensor_id);
+            }
+            // 输入必须引用已存在的传感器（寄存器或更早的 computed）
+            for (var, src) in &c.inputs {
+                if !known_sensors.contains(src.as_str()) && !computed_ids.contains(src.as_str()) {
+                    bail!(
+                        "computed `{}`: input `{}` references unknown sensor_id `{}`",
+                        c.sensor_id,
+                        var,
+                        src
+                    );
+                }
+            }
+            // 表达式必须可解析，且其变量必须已在 inputs 中定义
+            // （bindn 本身会拒绝未知变量）
+            use std::str::FromStr;
+            let expr = meval::Expr::from_str(&c.expression).map_err(|e| {
+                anyhow::anyhow!(
+                    "computed `{}`: invalid expression `{}`: {e}",
+                    c.sensor_id,
+                    c.expression
+                )
+            })?;
+            let keys: Vec<&str> = c.inputs.keys().map(String::as_str).collect();
+            // bindn 校验表达式的每个变量都已绑定到某个输入。
+            let _bound = expr
+                .clone()
+                .bindn(&keys)
+                .map_err(|e| anyhow::anyhow!("computed `{}`: {e}", c.sensor_id))?;
+        }
+        // 对 computed -> computed 引用做环检测。
+        let mut state: std::collections::HashMap<&str, u8> = std::collections::HashMap::new();
+        fn visit<'a>(
+            id: &'a str,
+            computed: &'a [ComputedConfig],
+            state: &mut std::collections::HashMap<&'a str, u8>,
+        ) -> Result<(), String> {
+            match state.get(id) {
+                Some(&1) => return Err(format!("computed dependency cycle at `{id}`")),
+                Some(&2) => return Ok(()),
+                _ => {}
+            }
+            state.insert(id, 1);
+            if let Some(c) = computed.iter().find(|c| c.sensor_id == id) {
+                for src in c.inputs.values() {
+                    if computed.iter().any(|c| c.sensor_id == *src) {
+                        visit(src, computed, state)?;
+                    }
+                }
+            }
+            state.insert(id, 2);
+            Ok(())
+        }
+        for c in &self.computed {
+            visit(&c.sensor_id, &self.computed, &mut state)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
         Ok(())
     }
 
-    /// Add a register to an existing device (runtime hot-add, dev builds).
-    /// Runs the same rules as `validate()` incrementally so errors point at
-    /// the new register. An optional pipeline may accompany the register.
+    /// 向已有设备添加一个寄存器（运行时热添加，开发构建）。
+    /// 以增量方式执行与 `validate()` 相同的规则，使错误能精确定位到
+    /// 新寄存器。可选的管道可与寄存器一同添加。
     pub fn add_register(
         &mut self,
         device_name: &str,
         register: RegisterConfig,
         pipeline: Option<PipelineConfig>,
     ) -> Result<(), String> {
-        // 1. sensor_id must be unique gateway-wide (immutable borrow first).
+        // 1. sensor_id 必须在整个网关内唯一（先做不可变借用）。
         for d in &self.devices {
             for r in &d.registers {
                 if r.sensor_id == register.sensor_id {
@@ -195,14 +330,14 @@ impl Config {
             }
         }
 
-        // 2. Device must exist.
+        // 2. 设备必须存在。
         let device = self
             .devices
             .iter_mut()
             .find(|d| d.name == device_name)
             .ok_or_else(|| format!("device `{device_name}` not found"))?;
 
-        // 3. Address range must not overlap same-function registers on this device.
+        // 3. 地址范围不得与该设备上同功能区的寄存器重叠。
         let width = register.effective_count();
         let end = register
             .address
@@ -210,10 +345,7 @@ impl Config {
             .ok_or_else(|| "register address overflow".to_string())?;
         for r in &device.registers {
             if r.function == register.function {
-                let other_end = r
-                    .address
-                    .checked_add(r.effective_count())
-                    .unwrap_or(u16::MAX);
+                let other_end = r.address.saturating_add(r.effective_count());
                 if register.address < other_end && r.address < end {
                     return Err(format!(
                         "register range [{}, {}) overlaps `{}` range [{}, {})",
@@ -223,7 +355,7 @@ impl Config {
             }
         }
 
-        // 4. Pipeline (optional) must match the register and be valid.
+        // 4. 管道（可选）必须匹配该寄存器且有效。
         if let Some(p) = &pipeline {
             if p.sensor_id != register.sensor_id {
                 return Err(format!(
@@ -247,7 +379,7 @@ impl Config {
     }
 }
 
-/// Global settings.
+/// 全局设置。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct GeneralConfig {
     #[serde(default = "default_log_level")]
@@ -266,21 +398,16 @@ fn default_log_level() -> LogLevel {
     LogLevel::Info
 }
 
-/// Log verbosity, mapped to a `tracing::Level` in `logging`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// 日志详细程度，映射到 `logging` 中的 `tracing::Level`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        Self::Info
-    }
 }
 
 impl LogLevel {
@@ -295,42 +422,42 @@ impl LogLevel {
     }
 }
 
-/// One PCBA device (a Modbus slave) and its register map.
+/// 一台 PCBA 设备（一个 Modbus 从站）及其寄存器映射。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConfig {
-    /// Unique device name (used in logs).
+    /// 唯一设备名（用于日志）。
     pub name: String,
-    /// Transport: "tcp" (Modbus-TCP) or "rtu" (Modbus-RTU over serial).
+    /// 传输方式："tcp"（Modbus-TCP）或 "rtu"（串口 Modbus-RTU）。
     #[serde(default)]
     pub transport: Transport,
-    /// Modbus slave/unit id, 0..=247.
+    /// Modbus 从站/单元 id，0..=247。
     #[serde(default = "default_unit_id")]
     pub unit_id: u8,
-    /// TCP: host name or IP.
+    /// TCP：主机名或 IP。
     #[serde(default)]
     pub host: String,
-    /// TCP: port.
+    /// TCP：端口。
     #[serde(default = "default_port")]
     pub port: u16,
-    /// Polling period.
+    /// 轮询周期。
     #[serde(default = "default_poll_interval_ms")]
     pub poll_interval_ms: u64,
-    /// Per-request timeout.
+    /// 每次请求的超时时间。
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
-    /// Backoff start for failed polls.
+    /// 轮询失败后的退避起始时间。
     #[serde(default = "default_reconnect_initial_ms")]
     pub reconnect_initial_ms: u64,
-    /// Backoff cap.
+    /// 退避上限。
     #[serde(default = "default_reconnect_max_ms")]
     pub reconnect_max_ms: u64,
-    /// RTU: serial port name (e.g. "COM3").
+    /// RTU：串口名（如 "COM3"）。
     #[serde(default)]
     pub serial_port: Option<String>,
-    /// RTU: baud rate (e.g. 9600).
+    /// RTU：波特率（如 9600）。
     #[serde(default)]
     pub baud_rate: Option<u32>,
-    /// Registers to read on every poll.
+    /// 每次轮询要读取的寄存器。
     #[serde(default)]
     pub registers: Vec<RegisterConfig>,
 }
@@ -354,7 +481,7 @@ fn default_reconnect_max_ms() -> u64 {
     30000
 }
 
-/// Modbus transport type.
+/// Modbus 传输类型。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
@@ -363,14 +490,19 @@ pub enum Transport {
     Rtu,
 }
 
-/// Register address space (function code).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+/// 寄存器地址空间（功能码）。覆盖四个 Modbus 区域。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum RegisterFunction {
-    /// Holding registers (function 0x03).
+    /// 保持寄存器（0x03 读 / 0x06、0x10 写）。可读写。
+    #[default]
     Holding,
-    /// Input registers (function 0x04).
+    /// 输入寄存器（0x04）。只读。
     Input,
+    /// 线圈（0x01 读 / 0x05 写）。单 bit，可读写。
+    Coil,
+    /// 离散输入（0x02）。单 bit，只读。
+    DiscreteInput,
 }
 
 impl RegisterFunction {
@@ -378,11 +510,32 @@ impl RegisterFunction {
         match self {
             RegisterFunction::Holding => 0x03,
             RegisterFunction::Input => 0x04,
+            RegisterFunction::Coil => 0x01,
+            RegisterFunction::DiscreteInput => 0x02,
         }
+    }
+
+    /// 该区域是否可被协议层写入（holding/coil）。
+    pub fn is_writable(&self) -> bool {
+        matches!(self, RegisterFunction::Holding | RegisterFunction::Coil)
+    }
+
+    /// 该区域是否单 bit（coil/离散输入）。
+    pub fn is_bit(&self) -> bool {
+        matches!(self, RegisterFunction::Coil | RegisterFunction::DiscreteInput)
     }
 }
 
-/// How to interpret a register group's words.
+/// 寄存器访问权限：决定协议层是否可以写入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Access {
+    #[default]
+    Read,
+    ReadWrite,
+}
+
+/// 如何解释一组寄存器的字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ValueType {
@@ -392,59 +545,65 @@ pub enum ValueType {
     U32,
     I32,
     F32,
+    /// 单个 bit（0/1）；与 `coil` / `discrete_input` 搭配使用。
+    Bool,
 }
 
 impl ValueType {
-    /// Number of 16-bit registers this value occupies.
+    /// 该值占用的 16 位寄存器数量。
     pub fn register_count(&self) -> u16 {
         match self {
-            ValueType::U16 | ValueType::I16 => 1,
+            ValueType::U16 | ValueType::I16 | ValueType::Bool => 1,
             ValueType::U32 | ValueType::I32 | ValueType::F32 => 2,
         }
     }
 }
 
-/// Word order for multi-register values.
+/// 多寄存器值的字序。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WordOrder {
-    /// First register holds the high word (e.g. `[0xDEAD, 0xBEEF]` -> 0xDEADBEEF).
+    /// 第一个寄存器存高字（如 `[0xDEAD, 0xBEEF]` -> 0xDEADBEEF）。
     #[default]
     Big,
-    /// First register holds the low word.
+    /// 第一个寄存器存低字。
     Little,
 }
 
-/// One register group to read and how to decode it.
+/// 要读取的一组寄存器及其解码方式。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterConfig {
-    /// Human-readable name (logs only).
+    /// 人类可读名称（仅用于日志）。
     pub name: String,
-    /// Unique gateway-wide metric key (e.g. "pcba-01.cpu_temp").
+    /// 全网关唯一的指标键（如 "pcba-01.cpu_temp"）。
     pub sensor_id: String,
-    /// Register address space.
+    /// 寄存器地址空间。
     #[serde(default = "default_function")]
     pub function: RegisterFunction,
-    /// Start address (0-based).
+    /// 起始地址（从 0 开始）。
     pub address: u16,
-    /// Number of 16-bit registers; defaults to the size of `value_type`
-    /// (1 for u16/i16, 2 for u32/i32/f32). Must match when set explicitly.
+    /// 16 位寄存器数量；默认为 `value_type` 的大小
+    /// （u16/i16 为 1，u32/i32/f32 为 2）。显式设置时必须匹配。
     #[serde(default)]
     pub count: Option<u16>,
-    /// Numeric interpretation of the register group.
+    /// 寄存器组的数值解释。
     #[serde(default)]
     pub value_type: ValueType,
-    /// Word order for multi-register values.
+    /// 多寄存器值的字序。
     #[serde(default)]
     pub word_order: WordOrder,
-    /// Raw unit, informational (pipeline converts units in phase 3).
+    /// 原始单位，仅作信息展示（管道在阶段 3 换算单位）。
     #[serde(default)]
     pub unit: Option<String>,
+    /// 访问权限（read | read_write）。可读写寄存器可被
+    /// 协议层写入（仅限 holding/coil 区域）。
+    #[serde(default)]
+    pub access: Access,
 }
 
 impl RegisterConfig {
-    /// Number of 16-bit registers to read: explicit `count`, or derived from
-    /// `value_type` when omitted.
+    /// 要读取的 16 位寄存器数量：显式 `count`，或省略时
+    /// 由 `value_type` 推导。
     pub fn effective_count(&self) -> u16 {
         self.count.unwrap_or_else(|| self.value_type.register_count())
     }
@@ -454,22 +613,39 @@ fn default_function() -> RegisterFunction {
     RegisterFunction::Holding
 }
 
-/// Processing pipeline for one sensor: a chain of stages applied in order,
-/// converting a raw sample into a processed metric (phase 3).
+/// 虚拟传感器：通过数学表达式从其他传感器的值计算出的指标
+/// （露点、温差/压差等）。无需硬件读取。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputedConfig {
+    /// 唯一指标键（全网关唯一；不得与寄存器冲突）。
+    pub sensor_id: String,
+    /// 显示名称。
+    pub name: String,
+    /// 物理单位（供协议层分类使用）。
+    #[serde(default)]
+    pub unit: Option<String>,
+    /// 变量名 -> 引用的 sensor_id（真实寄存器或另一个 computed）。
+    pub inputs: std::collections::HashMap<String, String>,
+    /// 基于 `inputs` 键的数学表达式（meval 语法）。
+    pub expression: String,
+}
+
+/// 单个传感器的处理管道：按顺序应用的一组阶段，
+/// 将原始样本转换为处理后的指标（阶段 3）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
-    /// Must match the `sensor_id` of some device register (gateway-wide unique).
+    /// 必须匹配某设备寄存器的 `sensor_id`（全网关唯一）。
     pub sensor_id: String,
-    /// Stages, executed in order on every sample.
+    /// 阶段，每个样本按顺序执行。
     #[serde(default)]
     pub stages: Vec<StageConfig>,
 }
 
-/// One stage of a pipeline. The tag is the TOML `type` field.
+/// 管道的一个阶段。标签即 TOML 的 `type` 字段。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StageConfig {
-    /// Linear conversion: `value = value * scale + offset`, optionally updates the unit.
+    /// 线性换算：`value = value * scale + offset`，可选更新单位。
     Scale {
         scale: f64,
         #[serde(default)]
@@ -477,19 +653,19 @@ pub enum StageConfig {
         #[serde(default)]
         unit: Option<String>,
     },
-    /// Sliding window average filter.
+    /// 滑动窗口平均滤波。
     SlidingAverage {
         window: usize,
     },
-    /// Sliding window median filter.
+    /// 滑动窗口中值滤波。
     Median {
         window: usize,
     },
-    /// Math expression over the current value (variable `v`), e.g. `(v - 273.15) * 10`.
+    /// 基于当前值的数学表达式（变量 `v`），如 `(v - 273.15) * 10`。
     Math {
         expression: String,
     },
-    /// Threshold check, sets the metric status (critical beats warning).
+    /// 阈值检查，设置指标状态（critical 优先于 warning）。
     Threshold {
         #[serde(default)]
         low_warning: Option<f64>,
@@ -500,14 +676,14 @@ pub enum StageConfig {
         #[serde(default)]
         high_critical: Option<f64>,
     },
-    /// Windowed statistics (min / max / avg), replacing the value.
+    /// 窗口统计（min / max / avg），替换当前值。
     Aggregate {
         window: usize,
         mode: AggregateMode,
     },
 }
 
-/// Aggregation modes for [`StageConfig::Aggregate`].
+/// [`StageConfig::Aggregate`] 的聚合模式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AggregateMode {
@@ -660,7 +836,7 @@ expression = "v +* 2"
         assert_eq!(dev.host, "127.0.0.1");
         assert_eq!(dev.port, 1502);
         assert_eq!(dev.registers.len(), 2);
-        // count defaults to value_type size
+        // count 默认为 value_type 的大小
         assert_eq!(dev.registers[0].effective_count(), 1);
         assert_eq!(dev.registers[1].effective_count(), 2);
         cfg.validate().unwrap();

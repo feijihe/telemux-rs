@@ -1,13 +1,13 @@
-//! Dev dashboard HTTP + WebSocket server (axum).
+//! 开发仪表盘 HTTP + WebSocket 服务器（axum）。
 //!
-//! Routes:
-//! - `GET /`             — single-page dashboard (embedded HTML)
-//! - `GET /api/snapshot` — JSON snapshot (polling fallback)
-//! - `GET /api/ws`       — WebSocket, pushes a JSON snapshot every `interval`
-//! - `POST /api/registers` — hot-add a register (dev builds; validated, then
-//!   persisted to the config file; takes effect within one poll interval)
+//! 路由：
+//! - `GET /`             — 单页仪表盘（内嵌 HTML）
+//! - `GET /api/snapshot` — JSON 快照（轮询回退）
+//! - `GET /api/ws`       — WebSocket，每隔 `interval` 推送一次 JSON 快照
+//! - `POST /api/registers` — 热添加寄存器（开发构建；校验后
+//!   持久化到配置文件；在一个轮询间隔内生效）
 //!
-//! Binds to `127.0.0.1:<port>` (default 8080), dev-only.
+//! 绑定到 `127.0.0.1:<port>`（默认 8080），仅开发使用。
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ use crate::store::MetricStore;
 
 const DEFAULT_PORT: u16 = 8080;
 
-/// Shared state for all handlers.
+/// 所有处理程序共享的状态。
 #[derive(Clone)]
 struct DashboardState {
     config: ConfigHandle,
@@ -39,7 +39,7 @@ struct DashboardState {
     broadcast: broadcast::Sender<String>,
 }
 
-/// Body of `POST /api/registers`.
+/// `POST /api/registers` 的请求体。
 #[derive(Debug, Deserialize)]
 pub struct CreateRegisterRequest {
     pub device: String,
@@ -48,9 +48,9 @@ pub struct CreateRegisterRequest {
     pub pipeline: Option<PipelineConfig>,
 }
 
-/// Start the dashboard server plus its broadcast task.
+/// 启动仪表盘服务器及其广播任务。
 ///
-/// `shutdown` stops the server; returns the server task handle (abort on drop).
+/// `shutdown` 停止服务器；返回服务器任务句柄（drop 时 abort）。
 pub fn spawn(
     config: ConfigHandle,
     store: Arc<MetricStore>,
@@ -77,7 +77,7 @@ async fn run(
 
     let (broadcast_tx, _) = broadcast::channel::<String>(16);
 
-    // Broadcast interval: smallest poll interval across devices, min 250ms.
+    // 广播间隔：所有设备中最小的轮询间隔，下限 250ms。
     let interval = Duration::from_millis(
         config
             .read()
@@ -126,8 +126,8 @@ async fn run(
     Ok(())
 }
 
-/// Periodically read the store and broadcast an incremental update
-/// (raw + metric only) to all clients. Static config goes over HTTP.
+/// 周期性读取存储并向所有客户端广播增量更新
+/// （仅 raw + metric）。静态配置走 HTTP。
 async fn broadcast_loop(
     store: Arc<MetricStore>,
     tx: broadcast::Sender<String>,
@@ -141,7 +141,7 @@ async fn broadcast_loop(
         }
         let msg = snapshot::build_update(&store);
         let json = serde_json::to_string(&msg).unwrap_or_else(|_| "{}".to_string());
-        // Ignore send errors: a channel with no receivers is normal.
+        // 忽略发送错误：没有接收者的通道是正常的。
         let _ = tx.send(json);
     }
 }
@@ -155,8 +155,8 @@ async fn snapshot_json(State(state): State<DashboardState>) -> impl IntoResponse
     axum::Json(snap)
 }
 
-/// Hot-add a register (dev builds). Validates, applies to the shared config,
-/// and persists to the config file (best-effort).
+/// 热添加寄存器（开发构建）。校验后应用到共享配置，
+/// 并持久化到配置文件（尽力而为）。
 async fn create_register(
     State(state): State<DashboardState>,
     Json(req): Json<CreateRegisterRequest>,
@@ -191,14 +191,13 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_ws(socket, state))
 }
 
-/// Push an initial incremental update, then every broadcast update, until the
-/// client disconnects or the broadcast channel closes. Full config is fetched
-/// by the client over HTTP.
+/// 先推送一次初始增量更新，随后推送每次广播更新，直到客户端断开或
+/// 广播通道关闭。完整配置由客户端通过 HTTP 获取。
 async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
     debug!("dev dashboard: websocket client connected");
     let mut updates = state.broadcast.subscribe();
 
-    // Initial update immediately (client already has the full table from HTTP).
+    // 立即发送初始更新（客户端已通过 HTTP 拿到完整表格）。
     let initial = snapshot::build_update(&state.store);
     let json = serde_json::to_string(&initial).unwrap_or_else(|_| "{}".to_string());
     if socket.send(Message::Text(json.into())).await.is_err() {
@@ -215,13 +214,13 @@ async fn handle_ws(mut socket: WebSocket, state: DashboardState) {
                             break;
                         }
                     }
-                    Err(_) => break, // broadcaster gone
+                    Err(_) => break, // 广播者已退出
                 }
             }
             msg = stream.next() => {
                 match msg {
                     Some(Ok(Message::Close(_))) | None => break,
-                    Some(Ok(_)) => {} // ignore pings/pongs/other
+                    Some(Ok(_)) => {} // 忽略 ping/pong/其他
                     Some(Err(_)) => break,
                 }
             }

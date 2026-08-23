@@ -1,14 +1,14 @@
-//! Runtime configuration handle.
+//! 运行时配置句柄。
 //!
-//! Mutable in dev builds, read-only in release builds:
+//! 开发构建可变更，release 构建只读：
 //!
 //! - 开发环境（`debug_assertions` 或 `feature = "dev-dashboard"`）：
 //!   内部为 `Arc<RwLock<Config>>`，`update()` 可热更新并可选 `save()` 写回 TOML。
 //! - 生产环境（release、无 feature）：内部为 `Arc<Config>` 纯只读，`update()`/`save()`
 //!   **编译期不存在** —— 引用它们的代码在生产构建下直接编译失败，保证生产不可变。
 //!
-//! All consumers use the uniform `read()` / `revision()` API and carry no cfg
-//! branches of their own.
+//! 所有使用者都通过统一的 `read()` / `revision()` API 访问，自身无需携带任何
+//! cfg 分支。
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,22 +16,22 @@ use std::sync::{Arc, RwLock};
 
 use crate::config::Config;
 
-/// Whether the config is mutable in this build.
+/// 本次构建中配置是否可变。
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 const MUTABLE: bool = true;
 #[cfg(not(any(debug_assertions, feature = "dev-dashboard")))]
 const MUTABLE: bool = false;
 
-/// Shared handle to the runtime configuration.
+/// 运行时配置的共享句柄。
 #[derive(Clone)]
 pub struct ConfigHandle {
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     inner: Arc<RwLock<Config>>,
     #[cfg(not(any(debug_assertions, feature = "dev-dashboard")))]
     inner: Arc<Config>,
-    /// Bumped on every dev update; always 0 in release builds.
+    /// 每次开发更新时递增；release 构建恒为 0。
     revision: Arc<AtomicU64>,
-    /// Config file path (dev persistence).
+    /// 配置文件路径（开发持久化）。
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     path: Arc<PathBuf>,
 }
@@ -55,12 +55,12 @@ impl ConfigHandle {
         }
     }
 
-    /// Whether this build supports runtime config mutation.
+    /// 本次构建是否支持运行时配置变更。
     pub fn is_mutable(&self) -> bool {
         MUTABLE
     }
 
-    /// Snapshot of the current configuration.
+    /// 当前配置的快照。
     pub fn read(&self) -> Config {
         #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
         {
@@ -72,24 +72,22 @@ impl ConfigHandle {
         }
     }
 
-    /// Current configuration revision. Changes only via [`Self::update`]
-    /// (dev builds); constant 0 in release builds.
+    /// 当前配置版本号。仅通过 [`Self::update`] 变化
+    /// （开发构建）；release 构建恒为 0。
     pub fn revision(&self) -> u64 {
         self.revision.load(Ordering::Relaxed)
     }
 
-    /// Mutate the configuration. The closure may fail (e.g. validation of the
-    /// new register) — on error nothing is changed. Full `Config::validate()`
-    /// runs before the change sticks.
+    /// 变更配置。闭包可能失败（例如新寄存器校验失败）——出错时不做任何修改。
+    /// 变更生效前会执行完整的 `Config::validate()`。
     ///
-    /// Only exists in dev builds; absent in release (compile-time guarantee).
+    /// 仅存在于开发构建；release 中不存在（编译期保证）。
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     pub fn update<F>(&self, f: F) -> Result<(), String>
     where
         F: FnOnce(&mut Config) -> Result<(), String>,
     {
-        // Mutate and validate a candidate first; only commit on success so a
-        // failed change never leaves a dirty config behind.
+        // 先变更并校验候选配置；成功后才提交，失败的变更不会留下脏配置。
         let mut candidate = self.read();
         f(&mut candidate)?;
         candidate.validate().map_err(|e| e.to_string())?;
@@ -99,14 +97,14 @@ impl ConfigHandle {
         Ok(())
     }
 
-    /// Persist the current config to the TOML file (dev builds only).
+    /// 将当前配置持久化到 TOML 文件（仅开发构建）。
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     pub fn save(&self) -> Result<(), String> {
         let text = toml::to_string_pretty(&self.read()).map_err(|e| e.to_string())?;
         std::fs::write(self.path.as_ref(), text).map_err(|e| e.to_string())
     }
 
-    /// Config file path (dev builds only).
+    /// 配置文件路径（仅开发构建）。
     #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
     pub fn path(&self) -> &Path {
         &self.path
@@ -144,9 +142,12 @@ mod tests {
                     value_type: ValueType::U16,
                     word_order: WordOrder::Big,
                     unit: None,
+                    access: crate::config::Access::Read,
                 }],
             }],
             pipelines: vec![],
+            computed: vec![],
+            endpoints: Default::default(),
         }
     }
 
@@ -160,6 +161,7 @@ mod tests {
             value_type: ValueType::U16,
             word_order: WordOrder::Big,
             unit: None,
+            access: crate::config::Access::Read,
         }
     }
 

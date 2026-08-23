@@ -1,11 +1,11 @@
-//! Mock PCBA Modbus-TCP slave for local development.
+//! 用于本地开发的模拟 PCBA Modbus-TCP 从站。
 //!
-//! Usage: `cargo run --example mock_pcba [port]` (default port 1502).
-//! Serves the register map that `config/example.toml` expects, with dynamic
-//! values that change on every read so you can watch the gateway log live data.
+//! 用法：`cargo run --example mock_pcba [port]`（默认端口 1502）。
+//! 提供 `config/example.toml` 期望的寄存器映射，每次读取值都变化，
+//! 以便观察网关实时数据日志。
 //!
-//! The mock only exists in dev builds (see `src/mock.rs`); in release builds
-//! this example compiles to a stub that explains the limitation.
+//! mock 仅存在于开发构建中（见 `src/mock.rs`）；在 release 构建中
+//! 本示例编译为说明限制的桩程序。
 
 #[cfg(any(debug_assertions, feature = "dev-dashboard"))]
 use telemux::mock::MockPcba;
@@ -19,14 +19,14 @@ async fn main() -> anyhow::Result<()> {
     let bind = format!("127.0.0.1:{port}");
     let pcba = MockPcba::dynamic();
     let handle = pcba.spawn(&bind).await?;
-    println!("mock PCBA listening on {bind} (dynamic register values)");
-    println!("  holding[0]      = cpu temp raw   (u16)");
-    println!("  holding[1]      = fan speed raw  (u16)");
-    println!("  holding[2..4]   = uptime ticks   (u32, big)");
+    println!("mock PCBA 监听 {bind}（动态寄存器值）");
+    println!("  holding[0]      = cpu 温度原始值 (u16)");
+    println!("  holding[1]      = 风扇转速原始值  (u16)");
+    println!("  holding[2..4]   = 运行时长 ticks  (u32, big)");
     println!("  holding[4..6]   = vcore          (f32, big)");
-    println!("  input[0]        = vin raw        (u16)");
-    println!("  input[1]        = iin raw        (u16)");
-    println!("press Ctrl+C to stop");
+    println!("  input[0]        = vin 原始值     (u16)");
+    println!("  input[1]        = iin 原始值     (u16)");
+    println!("按 Ctrl+C 停止");
     tokio::signal::ctrl_c().await?;
     drop(handle);
     println!("mock PCBA stopped");
@@ -36,8 +36,8 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(not(any(debug_assertions, feature = "dev-dashboard")))]
 fn main() {
     eprintln!(
-        "mock_pcba example is only available in dev builds \
-         (debug_assertions or --features dev-dashboard)"
+        "mock_pcba 示例仅适用于开发构建 \
+         (debug_assertions 或 --features dev-dashboard)"
     );
     std::process::exit(1);
 }

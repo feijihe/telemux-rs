@@ -1,9 +1,8 @@
-//! Metric store: latest raw sample + processed metric per sensor.
+//! 指标存储：每个传感器的最近原始样本 + 处理后的指标。
 //!
-//! Written by the acquisition consumer (raw first, then metric after the
-//! pipeline runs); read by the dev dashboard and, later, the protocol layers
-//! (Redfish / SNMP / Modbus). A revision watch channel notifies subscribers
-//! of any update (used by dashboards, alerts, traps).
+//! 由采集消费者写入（先写原始值，管道运行后写指标）；供开发仪表盘以及
+//! 后续的协议层（Redfish / SNMP / Modbus）读取。版本 watch 通道通知订阅者
+//! 任何更新（供仪表盘、告警、trap 使用）。
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -12,22 +11,22 @@ use tokio::sync::watch;
 
 use crate::domain::{Metric, RawSample, SensorId};
 
-/// Latest state of one sensor.
+/// 单个传感器的最近状态。
 #[derive(Debug, Clone)]
 pub struct SensorState {
-    /// Latest raw sample (pre-pipeline).
-    pub raw: RawSample,
-    /// Latest processed metric (post-pipeline); `None` until the pipeline
-    /// produces one (e.g. sensor has no pipeline configured, or the pipeline
-    /// failed — the previous metric is intentionally kept).
+    /// 最近的原始样本（管道之前）。computed 传感器为 `None`
+    /// （虚拟指标没有硬件读取）。
+    pub raw: Option<RawSample>,
+    /// 最近的处理后指标（管道之后 / computed）；在存在之前为 `None`
+    /// （例如传感器没有管道，或管道失败——此时有意保留旧指标）。
     pub metric: Option<Metric>,
 }
 
-/// Thread-safe store of the latest `(raw, metric)` per sensor.
+/// 每传感器最近 `(raw, metric)` 的线程安全存储。
 #[derive(Debug)]
 pub struct MetricStore {
     inner: RwLock<HashMap<SensorId, SensorState>>,
-    /// Incremented on every write; subscribers use it as a change signal.
+    /// 每次写入时递增；订阅者将其作为变更信号。
     revision: watch::Sender<u64>,
 }
 
@@ -40,27 +39,28 @@ impl MetricStore {
         }
     }
 
-    /// Record a raw sample (pipeline input). Keeps any existing metric.
+    /// 记录一个原始样本（管道输入）。保留已有的指标。
     pub fn update_raw(&self, sample: RawSample) {
         if let Ok(mut inner) = self.inner.write() {
             let entry = inner.entry(sample.sensor_id.clone()).or_insert(SensorState {
-                raw: sample.clone(),
+                raw: Some(sample.clone()),
                 metric: None,
             });
-            entry.raw = sample;
+            entry.raw = Some(sample);
             let _ = self.revision.send(inner.len() as u64);
         }
     }
 
-    /// Record a batch of raw samples.
+    /// 记录一批原始样本。
     pub fn update_batch_raw(&self, batch: &[RawSample]) {
         for sample in batch {
             self.update_raw(sample.clone());
         }
     }
 
-    /// Record a processed metric together with its source raw sample.
-    pub fn update_metric(&self, raw: RawSample, metric: Metric) {
+    /// 记录一个处理后的指标及其来源原始样本。
+    /// computed 传感器的 `raw` 为 `None`。
+    pub fn update_metric(&self, raw: Option<RawSample>, metric: Metric) {
         if let Ok(mut inner) = self.inner.write() {
             inner.insert(
                 metric.sensor_id.clone(),
@@ -73,17 +73,17 @@ impl MetricStore {
         }
     }
 
-    /// Latest state for a sensor, if any.
+    /// 某传感器的最新状态，若存在。
     pub fn get(&self, sensor_id: &SensorId) -> Option<SensorState> {
         self.inner.read().ok()?.get(sensor_id).cloned()
     }
 
-    /// Snapshot of all sensors (latest raw + metric).
+    /// 所有传感器的快照（最近的原始值 + 指标）。
     pub fn snapshot(&self) -> HashMap<SensorId, SensorState> {
         self.inner.read().map(|m| m.clone()).unwrap_or_default()
     }
 
-    /// Number of tracked sensors.
+    /// 已跟踪的传感器数量。
     pub fn len(&self) -> usize {
         self.inner.read().map(|m| m.len()).unwrap_or(0)
     }
@@ -92,8 +92,7 @@ impl MetricStore {
         self.len() == 0
     }
 
-    /// Subscribe to revision changes (fires after every write; carries the
-    /// current revision as the value).
+    /// 订阅版本变更（每次写入后触发；以当前版本号作为值）。
     pub fn subscribe(&self) -> watch::Receiver<u64> {
         self.revision.subscribe()
     }
@@ -105,7 +104,7 @@ impl Default for MetricStore {
     }
 }
 
-/// Convenience shared handle.
+/// 便捷的共享句柄。
 pub type SharedStore = Arc<MetricStore>;
 
 #[cfg(test)]
@@ -139,24 +138,33 @@ mod tests {
         let id = SensorId("s.1".into());
         store.update_raw(raw("s.1", 100.0));
         let state = store.get(&id).unwrap();
-        assert_eq!(state.raw.raw_value, 100.0);
+        assert_eq!(state.raw.as_ref().unwrap().raw_value, 100.0);
         assert!(state.metric.is_none());
 
-        store.update_metric(raw("s.1", 101.0), metric("s.1", 10.1));
+        store.update_metric(Some(raw("s.1", 101.0)), metric("s.1", 10.1));
         let state = store.get(&id).unwrap();
-        assert_eq!(state.raw.raw_value, 101.0);
+        assert_eq!(state.raw.as_ref().unwrap().raw_value, 101.0);
         assert_eq!(state.metric.unwrap().value, 10.1);
         assert_eq!(store.len(), 1);
     }
 
     #[test]
+    fn update_metric_without_raw_for_computed() {
+        let store = MetricStore::new();
+        store.update_metric(None, metric("s.dew", 18.6));
+        let state = store.get(&SensorId("s.dew".into())).unwrap();
+        assert!(state.raw.is_none(), "computed sensors have no raw");
+        assert_eq!(state.metric.unwrap().value, 18.6);
+    }
+
+    #[test]
     fn update_raw_keeps_previous_metric() {
         let store = MetricStore::new();
-        store.update_metric(raw("s.1", 1.0), metric("s.1", 1.0));
-        store.update_raw(raw("s.1", 2.0)); // pipeline not run yet
+        store.update_metric(Some(raw("s.1", 1.0)), metric("s.1", 1.0));
+        store.update_raw(raw("s.1", 2.0)); // 管道尚未运行
         let state = store.get(&SensorId("s.1".into())).unwrap();
-        assert_eq!(state.raw.raw_value, 2.0);
-        assert_eq!(state.metric.unwrap().value, 1.0); // stale metric retained
+        assert_eq!(state.raw.as_ref().unwrap().raw_value, 2.0);
+        assert_eq!(state.metric.unwrap().value, 1.0); // 保留过期指标
     }
 
     #[test]
@@ -164,10 +172,10 @@ mod tests {
         let store = MetricStore::new();
         let mut rx = store.subscribe();
         store.update_raw(raw("s.1", 1.0));
-        store.update_metric(raw("s.2", 2.0), metric("s.2", 2.0));
+        store.update_metric(Some(raw("s.2", 2.0)), metric("s.2", 2.0));
         let snap = store.snapshot();
         assert_eq!(snap.len(), 2);
-        // revision channel should have fired at least twice
+        // 版本通道应至少触发两次
         assert!(rx.has_changed().unwrap());
         let _ = rx.borrow_and_update();
     }

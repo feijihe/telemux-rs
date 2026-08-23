@@ -1,5 +1,5 @@
-//! Snapshot model: register configuration + latest raw sample + computed
-//! metric, serialized as JSON for the dev dashboard.
+//! 快照模型：寄存器配置 + 最近原始样本 + computed 指标，
+//! 序列化为 JSON 供开发仪表盘使用。
 
 use serde::Serialize;
 
@@ -8,10 +8,10 @@ use crate::config_handle::ConfigHandle;
 use crate::domain::{Metric, MetricStatus, RawSample, SensorId};
 use crate::store::MetricStore;
 
-/// Full snapshot of all devices and their latest samples.
+/// 所有设备及其最新样本的完整快照。
 #[derive(Debug, Clone, Serialize)]
 pub struct DashboardSnapshot {
-    /// Unix millis when the snapshot was generated.
+    /// 生成快照时的 Unix 毫秒时间。
     pub generated_at_ms: u64,
     pub devices: Vec<DeviceSnapshot>,
 }
@@ -22,7 +22,7 @@ pub struct DeviceSnapshot {
     pub transport: String,
     pub host: String,
     pub port: u16,
-    /// True if a raw sample was seen recently (within ~2 poll intervals).
+    /// 是否近期（约 2 个轮询间隔内）见过原始样本。
     pub connected: bool,
     pub registers: Vec<RegisterSnapshot>,
 }
@@ -37,13 +37,13 @@ pub struct RegisterSnapshot {
     pub value_type: &'static str,
     pub word_order: &'static str,
     pub unit: Option<String>,
-    /// Latest raw sample; `None` until the first successful read.
+    /// 最近的原始样本；首次成功读取前为 `None`。
     pub raw: Option<ValueSnapshot>,
-    /// Latest computed metric; `None` until the pipeline produces one.
+    /// 最近的计算指标；管道产出前为 `None`。
     pub metric: Option<MetricSnapshot>,
-    /// Human-readable pipeline formula (joined stages); `None` without a pipeline.
+    /// 人类可读的管道公式（阶段连接）；无管道时为 `None`。
     pub formula: Option<String>,
-    /// Per-stage formula texts (for the expandable detail row).
+    /// 逐阶段公式文本（供可展开的详情行使用）。
     pub stages: Vec<String>,
 }
 
@@ -105,7 +105,7 @@ pub fn build_update(store: &MetricStore) -> UpdateMessage {
     for (sensor_id, state) in store.snapshot() {
         samples.push(SampleUpdate {
             sensor_id: sensor_id.as_str().to_string(),
-            raw: Some(ValueSnapshot::from(&state.raw)),
+            raw: state.raw.as_ref().map(ValueSnapshot::from),
             metric: state.metric.as_ref().map(MetricSnapshot::from),
         });
     }
@@ -116,7 +116,7 @@ pub fn build_update(store: &MetricStore) -> UpdateMessage {
     }
 }
 
-/// Build a snapshot from the runtime configuration + the latest store state.
+/// 从运行时配置 + 存储的最新状态构建快照。
 pub fn build_snapshot(handle: &ConfigHandle, store: &MetricStore) -> DashboardSnapshot {
     let config: Config = handle.read();
     let generated_at_ms = now_ms();
@@ -126,7 +126,18 @@ pub fn build_snapshot(handle: &ConfigHandle, store: &MetricStore) -> DashboardSn
         let mut newest: Option<u64> = None;
         for reg in &device.registers {
             let state = store.get(&SensorId(reg.sensor_id.clone()));
-            let ts = state.as_ref().map(|s| s.raw.timestamp_ms());
+            // 新鲜度取 raw 或 metric 时间戳中较新者（computed
+            // 传感器没有 raw）。
+            let ts = state
+                .as_ref()
+                .and_then(|s| s.raw.as_ref())
+                .map(RawSample::timestamp_ms)
+                .or_else(|| {
+                    state
+                        .as_ref()
+                        .and_then(|s| s.metric.as_ref())
+                        .map(Metric::timestamp_ms)
+                });
             newest = newest.max(ts);
             let pipeline = config
                 .pipelines
@@ -141,7 +152,10 @@ pub fn build_snapshot(handle: &ConfigHandle, store: &MetricStore) -> DashboardSn
                 value_type: value_type_str(reg.value_type),
                 word_order: word_order_str(reg.word_order),
                 unit: reg.unit.clone(),
-                raw: state.as_ref().map(|s| ValueSnapshot::from(&s.raw)),
+                raw: state
+                    .as_ref()
+                    .and_then(|s| s.raw.as_ref())
+                    .map(ValueSnapshot::from),
                 metric: state.as_ref().and_then(|s| s.metric.as_ref()).map(MetricSnapshot::from),
                 formula: pipeline.map(crate::pipeline::describe_pipeline),
                 stages: pipeline
@@ -164,7 +178,7 @@ pub fn build_snapshot(handle: &ConfigHandle, store: &MetricStore) -> DashboardSn
     }
 }
 
-/// A sample is "fresh" if it arrived within ~2 poll intervals of now.
+/// 样本在距现在约 2 个轮询间隔内到达即为"新鲜"。
 fn is_fresh(newest: Option<u64>, poll_interval_ms: u64) -> bool {
     match newest {
         Some(ts) => now_ms().saturating_sub(ts) <= poll_interval_ms * 2,
@@ -190,6 +204,8 @@ fn function_str(f: RegisterFunction) -> &'static str {
     match f {
         RegisterFunction::Holding => "holding",
         RegisterFunction::Input => "input",
+        RegisterFunction::Coil => "coil",
+        RegisterFunction::DiscreteInput => "discrete_input",
     }
 }
 
@@ -200,6 +216,7 @@ fn value_type_str(v: crate::config::ValueType) -> &'static str {
         crate::config::ValueType::U32 => "u32",
         crate::config::ValueType::I32 => "i32",
         crate::config::ValueType::F32 => "f32",
+        crate::config::ValueType::Bool => "bool",
     }
 }
 
@@ -242,9 +259,12 @@ mod tests {
                     value_type: ValueType::U16,
                     word_order: WordOrder::Big,
                     unit: Some("counts".into()),
+                    access: crate::config::Access::Read,
                 }],
             }],
             pipelines: vec![],
+            computed: vec![],
+            endpoints: Default::default(),
         }
     }
 
@@ -275,7 +295,7 @@ mod tests {
         let handle = ConfigHandle::new(sample_config(), "unused.toml".into());
         let store = MetricStore::new();
         store.update_metric(
-            sample("pcba-01.cpu_temp", 251.0),
+            Some(sample("pcba-01.cpu_temp", 251.0)),
             Metric {
                 sensor_id: SensorId("pcba-01.cpu_temp".into()),
                 value: 25.1,

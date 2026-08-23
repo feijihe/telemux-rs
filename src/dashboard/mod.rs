@@ -1,8 +1,7 @@
-//! Dev dashboard: local web UI for inspecting register configuration and
-//! live raw samples.
+//! 开发仪表盘：用于查看寄存器配置和实时原始样本的本地 Web UI。
 //!
-//! Compile-time gated — see the `dev-dashboard` feature in `Cargo.toml` and
-//! `docs/DEV_DASHBOARD.md`.
+//! 编译期门控——见 `Cargo.toml` 中的 `dev-dashboard` feature 和
+//! `docs/DEV_DASHBOARD.md`。
 
 pub mod server;
 pub mod snapshot;
