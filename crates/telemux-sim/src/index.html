@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <title>Telemux-Sim — CDU 仿真器</title>
 <style>
-  body { font-family: Consolas, "Microsoft YaHei", monospace; margin: 16px; background: #f5f6fa; }
+  body { font-family: Consolas, "Microsoft YaHei", monospace; margin: 16px; background: #f5f6fa; overflow-x: hidden; }
   h1 { font-size: 20px; }
   h2 { font-size: 15px; margin-top: 20px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
   .status { font-size: 12px; color: #888; margin-bottom: 10px; }
@@ -16,15 +16,22 @@
   .ctrl-row input[type=number] { width: 80px; padding: 3px 6px; font-size: 13px; }
   .ctrl-row .val { font-size: 13px; color: #0a7; }
   button { padding: 4px 14px; cursor: pointer; }
-  /* Canvas 系统图 */
-  #sys { background: #fbfcfe; border: 1px solid #ddd; border-radius: 6px; }
-  #sys canvas { width: 100%; height: auto; display: block; }
-  table { border-collapse: collapse; background: #fff; margin-top: 6px; }
+  /* Canvas 系统图：aspect-ratio 保持 1040:640 比例，宽度自适应不溢出 */
+  #sys { background: #fbfcfe; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
+  #sys canvas {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1040 / 640;
+    display: block;
+    max-width: 100%;
+  }
+  table { border-collapse: collapse; background: #fff; margin-top: 6px; width: 100%; }
   th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; font-size: 12px; }
   th { background: #2f3b52; color: #fff; }
   tr:nth-child(even) { background: #f9f9f9; }
   .addr { color: #888; font-size: 11px; }
   .mono { font-family: Consolas, monospace; }
+  .table-wrap { overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -71,10 +78,12 @@
 
 <!-- ===== 寄存器表 ===== -->
 <h2>寄存器地图原始值</h2>
+<div class="table-wrap">
 <table id="raw">
   <thead><tr><th>区域</th><th>地址</th><th>槽位</th><th>原始值</th><th>解码</th></tr></thead>
   <tbody></tbody>
 </table>
+</div>
 
 <script>
 // ===== Canvas 常量 =====
