@@ -93,32 +93,26 @@ const COL = {
 
 // 传感器在系统图上的坐标（x, y）+ 标签 + 所属回路
 const SENSOR_POS = {
-  // 一次侧（冷水，左侧）
+  // 一次侧（冷水，左侧）：进口管 y=112，回水管 y=390
   "cdu.pri.p1":   {x: 110, y: 90,  label: "P1"},
   "cdu.pri.t1":   {x: 195, y: 90,  label: "T1"},
   "cdu.pri.p2":   {x: 110, y: 135, label: "P2"},
   "cdu.pri.t2":   {x: 195, y: 135, label: "T2"},
   "cdu.pri.f1":   {x: 280, y: 112, label: "F1"},
-  "cdu.pri.l1":   {x: 60,  y: 250, label: "L1"},
-  "cdu.pri.t3":   {x: 195, y: 460, label: "T3"},
-  "cdu.pri.p3":   {x: 110, y: 460, label: "P3"},
-  "cdu.pri.t4":   {x: 195, y: 505, label: "T4"},
-  "cdu.pri.p4":   {x: 110, y: 505, label: "P4"},
+  "cdu.pri.t3":   {x: 195, y: 350, label: "T3"},
+  "cdu.pri.p3":   {x: 110, y: 350, label: "P3"},
+  "cdu.pri.t4":   {x: 195, y: 395, label: "T4"},
+  "cdu.pri.p4":   {x: 110, y: 395, label: "P4"},
   // 二次侧（热水，右侧）：上管 y=112（PHE 出→服务器），下管 y=390（服务器→PHE 进）
   "cdu.sec.f2":   {x: 760, y: 112, label: "F2"},
   "cdu.sec.t5":   {x: 850, y: 90,  label: "T5"},
   "cdu.sec.p5":   {x: 930, y: 90,  label: "P5"},
   "cdu.sec.t6":   {x: 850, y: 135, label: "T6"},
   "cdu.sec.p6":   {x: 930, y: 135, label: "P6"},
-  "cdu.sec.t7":   {x: 850, y: 460, label: "T7"},
-  "cdu.sec.p7":   {x: 930, y: 460, label: "P7"},
-  "cdu.sec.t8":   {x: 850, y: 505, label: "T8"},
-  "cdu.sec.p8":   {x: 930, y: 505, label: "P8"},
-  // 泵（并联环）：泵2 中心 (600,268) 顶横管、泵1 中心 (600,390) 下管主线
-  "cdu.pump1.in_p":  {x: 505, y: 355, label: "泵1进"},
-  "cdu.pump1.out_p": {x: 505, y: 430, label: "泵1出"},
-  "cdu.pump2.in_p":  {x: 505, y: 233, label: "泵2进"},
-  "cdu.pump2.out_p": {x: 505, y: 308, label: "泵2出"},
+  "cdu.sec.t7":   {x: 850, y: 350, label: "T7"},
+  "cdu.sec.p7":   {x: 930, y: 350, label: "P7"},
+  "cdu.sec.t8":   {x: 850, y: 395, label: "T8"},
+  "cdu.sec.p8":   {x: 930, y: 395, label: "P8"},
   // 补水/回水管路（原膨胀槽区，不画槽体）
   "cdu.tank.p9":     {x: 560, y: 50,  label: "P9"},
   "cdu.tank.p10":    {x: 640, y: 50,  label: "P10"},
@@ -133,6 +127,15 @@ const SENSOR_POS = {
 const KIND_COLOR = COL; // 复用配色
 
 let current = null; // 最近一次状态
+
+// 从 current.controls 取控制变量当前值（无则 0）
+function controlValue(name) {
+  if (current) {
+    const c = current.controls.find(x => x.name === name);
+    if (c) return c.value;
+  }
+  return 0;
+}
 
 // ===== Canvas 绘制 =====
 function draw(ctx) {
@@ -151,11 +154,6 @@ function draw(ctx) {
   ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(330, 390); ctx.lineTo(40, 390);   // 一次侧回水管
-  ctx.stroke();
-  // 一次侧 L1 支路
-  ctx.strokeStyle = COL.pipe;
-  ctx.beginPath();
-  ctx.moveTo(90, 112); ctx.lineTo(90, 250); ctx.lineTo(70, 250);
   ctx.stroke();
 
   // 二次侧（热水回路）：服务器回水（上）→ PHEX 右上；PHEX 右下 → 服务器供水（下）
@@ -206,9 +204,11 @@ function draw(ctx) {
   ctx.font = '10px Consolas, monospace';
   ctx.fillText('板式换热器', 405, 256);
 
-  // ---- 泵（并联环上：泵2 在顶横管、泵1 在下管主线，见用户示意图）----
-  drawPump(ctx, 600, 268, '泵2');
-  drawPump(ctx, 600, 390, '泵1');
+  // ---- 泵（并联环上：泵2 在顶横管、泵1 在下管主线）——只显示转速(duty)----
+  const duty1 = controlValue('pump1_duty');
+  const duty2 = controlValue('pump2_duty');
+  drawPump(ctx, 600, 268, '泵2', duty2);
+  drawPump(ctx, 600, 390, '泵1', duty1);
 
   // ---- 服务器（右侧竖管）----
   ctx.fillStyle = '#eee';
@@ -223,14 +223,16 @@ function draw(ctx) {
   ctx.fillText('SERVER', 0, 0);
   ctx.restore();
 
-  // ---- 一次侧 H1 比例阀 ----
+  // ---- 一次侧 H1 比例阀（显示 duty）----
+  const v1 = controlValue('valve1_duty');
   ctx.fillStyle = '#f59f00';
   ctx.beginPath();
   ctx.moveTo(318, 104); ctx.lineTo(336, 112); ctx.lineTo(318, 120); ctx.closePath();
   ctx.fill();
   ctx.fillStyle = '#e8590c';
-  ctx.font = '10px Consolas, monospace';
-  ctx.fillText('H1', 340, 120);
+  ctx.font = 'bold 11px Consolas, monospace';
+  ctx.fillText('H1', 340, 118);
+  ctx.fillText(v1.toFixed(0) + '%', 340, 132);
 
   // ---- 传感器标点 ----
   const values = new Map(current.sensors.map(s => [s.sensor_id, s]));
@@ -279,7 +281,7 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawPump(ctx, cx, cy, label) {
+function drawPump(ctx, cx, cy, label, duty) {
   // 泵体：以 (cx, cy) 为中心，尺寸 70x75；横管穿过中心（进出口在左右两侧）
   const w = 70, h = 75, r = 6;
   ctx.fillStyle = '#e7f5ff';
@@ -296,11 +298,14 @@ function drawPump(ctx, cx, cy, label) {
   ctx.beginPath();
   ctx.moveTo(cx + w / 2, cy); ctx.lineTo(cx + w / 2 + 8, cy);
   ctx.stroke();
-  // 标签
+  // 标签 + 转速(duty)
   ctx.fillStyle = '#4dabf7';
   ctx.font = 'bold 12px Consolas, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(label, cx, cy + 4);
+  ctx.fillText(label, cx, cy - 6);
+  ctx.fillStyle = '#0a7';
+  ctx.font = 'bold 13px Consolas, monospace';
+  ctx.fillText(duty.toFixed(0) + ' RPM', cx, cy + 14);
   ctx.textAlign = 'left';
 }
 
@@ -367,12 +372,15 @@ function render(data) {
   fitCanvas();
   draw(ctx);
 
-  // 控制变量输入框回显
+  // 控制变量输入框回显——用户正在编辑（焦点在输入框）时不覆盖，避免打断输入
   const c = {};
   for (const x of data.controls) c[x.name] = x;
   const setField = (name, inputId, valId, unit) => {
     if (c[name]) {
-      document.getElementById(inputId).value = c[name].value;
+      const inp = document.getElementById(inputId);
+      if (document.activeElement !== inp) {
+        inp.value = c[name].value;   // 未聚焦才回显
+      }
       document.getElementById(valId).textContent = c[name].value + ' ' + unit;
     }
   };
