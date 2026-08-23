@@ -16,15 +16,12 @@
   .ctrl-row input[type=number] { width: 80px; padding: 3px 6px; font-size: 13px; }
   .ctrl-row .val { font-size: 13px; color: #0a7; }
   button { padding: 4px 14px; cursor: pointer; }
-  /* Canvas 系统图：aspect-ratio 保持 1040:640 比例，宽度自适应不溢出 */
-  #sys { background: #fbfcfe; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; }
-  #sys canvas {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1040 / 640;
-    display: block;
-    max-width: 100%;
+  /* Canvas 系统图：显示尺寸由 JS 按 1040:640 比例动态缩放，避免 CSS 不一致 */
+  #sys {
+    background: #fbfcfe; border: 1px solid #ddd; border-radius: 6px; overflow: hidden;
+    width: 100%; max-width: 100%;
   }
+  #sys canvas { display: block; max-width: 100%; }
   table { border-collapse: collapse; background: #fff; margin-top: 6px; width: 100%; }
   th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; font-size: 12px; }
   th { background: #2f3b52; color: #fff; }
@@ -107,26 +104,26 @@ const SENSOR_POS = {
   "cdu.pri.p3":   {x: 110, y: 460, label: "P3"},
   "cdu.pri.t4":   {x: 195, y: 505, label: "T4"},
   "cdu.pri.p4":   {x: 110, y: 505, label: "P4"},
-  // 二次侧（热水，右侧）
-  "cdu.sec.f2":   {x: 660, y: 112, label: "F2"},
-  "cdu.sec.t5":   {x: 745, y: 90,  label: "T5"},
-  "cdu.sec.p5":   {x: 830, y: 90,  label: "P5"},
-  "cdu.sec.t6":   {x: 745, y: 135, label: "T6"},
-  "cdu.sec.p6":   {x: 830, y: 135, label: "P6"},
-  "cdu.sec.t7":   {x: 745, y: 460, label: "T7"},
-  "cdu.sec.p7":   {x: 830, y: 460, label: "P7"},
-  "cdu.sec.t8":   {x: 745, y: 505, label: "T8"},
-  "cdu.sec.p8":   {x: 830, y: 505, label: "P8"},
-  // 泵（二次侧，PHEX 出口→服务器 之间）；泵1 中心 x=545，泵2 中心 x=625
-  "cdu.pump1.in_p":  {x: 490, y: 300, label: "泵1进"},
-  "cdu.pump1.out_p": {x: 490, y: 375, label: "泵1出"},
-  "cdu.pump2.in_p":  {x: 570, y: 300, label: "泵2进"},
-  "cdu.pump2.out_p": {x: 570, y: 375, label: "泵2出"},
+  // 二次侧（热水，右侧）：上管 y=112（PHE 出→服务器），下管 y=390（服务器→PHE 进）
+  "cdu.sec.f2":   {x: 760, y: 112, label: "F2"},
+  "cdu.sec.t5":   {x: 850, y: 90,  label: "T5"},
+  "cdu.sec.p5":   {x: 930, y: 90,  label: "P5"},
+  "cdu.sec.t6":   {x: 850, y: 135, label: "T6"},
+  "cdu.sec.p6":   {x: 930, y: 135, label: "P6"},
+  "cdu.sec.t7":   {x: 850, y: 460, label: "T7"},
+  "cdu.sec.p7":   {x: 930, y: 460, label: "P7"},
+  "cdu.sec.t8":   {x: 850, y: 505, label: "T8"},
+  "cdu.sec.p8":   {x: 930, y: 505, label: "P8"},
+  // 泵（并联环）：泵2 中心 (600,268) 顶横管、泵1 中心 (600,390) 下管主线
+  "cdu.pump1.in_p":  {x: 505, y: 355, label: "泵1进"},
+  "cdu.pump1.out_p": {x: 505, y: 430, label: "泵1出"},
+  "cdu.pump2.in_p":  {x: 505, y: 233, label: "泵2进"},
+  "cdu.pump2.out_p": {x: 505, y: 308, label: "泵2出"},
   // 补水/回水管路（原膨胀槽区，不画槽体）
-  "cdu.tank.p9":     {x: 585, y: 50,  label: "P9"},
-  "cdu.tank.p10":    {x: 665, y: 50,  label: "P10"},
-  "cdu.tank.level":  {x: 625, y: 90,  label: "LL1"},
-  "cdu.tank.ph":     {x: 625, y: 130, label: "PH1"},
+  "cdu.tank.p9":     {x: 560, y: 50,  label: "P9"},
+  "cdu.tank.p10":    {x: 640, y: 50,  label: "P10"},
+  "cdu.tank.level":  {x: 600, y: 90,  label: "LL1"},
+  "cdu.tank.ph":     {x: 600, y: 130, label: "PH1"},
   // 环境 / 泄漏（右下）
   "cdu.env.temp":    {x: 890, y: 560, label: "环境 T"},
   "cdu.env.rh":      {x: 890, y: 595, label: "环境 RH"},
@@ -161,49 +158,39 @@ function draw(ctx) {
   ctx.moveTo(90, 112); ctx.lineTo(90, 250); ctx.lineTo(70, 250);
   ctx.stroke();
 
-  // 二次侧（热水回路）：服务器回水（上）→ PHEX 右上；PHEX 右下 → 泵 → 服务器供水（下）
-  ctx.strokeStyle = COL.pipe_hot;
-  ctx.beginPath();
-  ctx.moveTo(1000, 112); ctx.lineTo(710, 112);  // 服务器回水管（热）
-  ctx.stroke();
+  // 二次侧（热水回路）：服务器回水（上）→ PHEX 右上；PHEX 右下 → 服务器供水（下）
+  // 上管：PHE 出水 → 服务器（去服务器供水，蓝/冷）
   ctx.strokeStyle = COL.pipe_cold;
   ctx.beginPath();
-  ctx.moveTo(710, 390); ctx.lineTo(1000, 390);  // 服务器供水管（冷）
+  ctx.moveTo(470, 112); ctx.lineTo(1000, 112);  // PHE 右上 → 服务器
   ctx.stroke();
-  // 泵连接：PHEX 出口(650,390) → 右侧竖管 → 泵入口汇管(y=292) → 泵出口汇管(y=383) → 服务器供水管
-  const P1X = 545, P2X = 625, P_TOP = 300, P_BOT = 375;
+  // 下管：服务器 → PHE 进水（向左箭头，红/热回水 + 泵送给 PHE）
+  ctx.strokeStyle = COL.pipe_hot;
+  ctx.beginPath();
+  ctx.moveTo(1000, 390); ctx.lineTo(470, 390);  // 服务器 → PHE 右下
+  ctx.stroke();
+  // 泵组并联环路（贴用户示意图）：泵2 在上横管、泵1 在下横管，两根竖管连成并联环
+  const PLX = 545, PRX = 655, PTY = 268, PBY = 390; // 左竖管、右竖管、顶横管(泵2)、底横管(泵1)
   ctx.strokeStyle = COL.pipe;
   ctx.lineWidth = 3;
-  // PHEX 右下 → 泵右侧竖管(680) → 泵入口汇管
+  // 左竖管（下管 → 顶横管）
   ctx.beginPath();
-  ctx.moveTo(650, 390); ctx.lineTo(680, 390); ctx.lineTo(680, 292);
+  ctx.moveTo(PLX, PBY); ctx.lineTo(PLX, PTY);
   ctx.stroke();
+  // 右竖管（下管 → 顶横管）
   ctx.beginPath();
-  ctx.moveTo(680, 292); ctx.lineTo(P1X, 292);
+  ctx.moveTo(PRX, PBY); ctx.lineTo(PRX, PTY);
   ctx.stroke();
-  // 泵入口短竖管（汇管 → 泵顶）
+  // 顶横管（泵2 置于其中段）
   ctx.beginPath();
-  ctx.moveTo(P1X, 292); ctx.lineTo(P1X, P_TOP);
+  ctx.moveTo(PLX, PTY); ctx.lineTo(PRX, PTY);
   ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(P2X, 292); ctx.lineTo(P2X, P_TOP);
-  ctx.stroke();
-  // 泵出口短竖管（泵底 → 出口汇管 y=383）
-  ctx.beginPath();
-  ctx.moveTo(P1X, P_BOT); ctx.lineTo(P1X, 383);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(P2X, P_BOT); ctx.lineTo(P2X, 383);
-  ctx.stroke();
-  // 出口汇管 → 服务器供水管
-  ctx.beginPath();
-  ctx.moveTo(P1X, 383); ctx.lineTo(P2X, 383); ctx.lineTo(710, 390);
-  ctx.stroke();
+  // 底横管即下管主线（泵1 置于其中段，见 drawPump）
   // 补水/回水支路（原膨胀槽）
   ctx.strokeStyle = COL.pipe;
   ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.moveTo(625, 112); ctx.lineTo(625, 140);   // 补水口连到回水管
+  ctx.moveTo(705, 112); ctx.lineTo(705, 140);   // 补水口连到回水管
   ctx.stroke();
 
   // ---- PHEX 板换（居中）----
@@ -219,9 +206,9 @@ function draw(ctx) {
   ctx.font = '10px Consolas, monospace';
   ctx.fillText('板式换热器', 405, 256);
 
-  // ---- 泵（PHEX 右下 → 服务器之间）----
-  drawPump(ctx, 545, 300, '泵1');
-  drawPump(ctx, 625, 300, '泵2');
+  // ---- 泵（并联环上：泵2 在顶横管、泵1 在下管主线，见用户示意图）----
+  drawPump(ctx, 600, 268, '泵2');
+  drawPump(ctx, 600, 390, '泵1');
 
   // ---- 服务器（右侧竖管）----
   ctx.fillStyle = '#eee';
@@ -292,17 +279,28 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawPump(ctx, x, y, label) {
-  // 泵体：中心 (x, y+37)，尺寸 70x75；进出口由外部汇管连接（泵顶 y、泵底 y+75）
+function drawPump(ctx, cx, cy, label) {
+  // 泵体：以 (cx, cy) 为中心，尺寸 70x75；横管穿过中心（进出口在左右两侧）
+  const w = 70, h = 75, r = 6;
   ctx.fillStyle = '#e7f5ff';
   ctx.strokeStyle = '#4dabf7';
   ctx.lineWidth = 2;
-  roundRect(ctx, x - 35, y, 70, 75, 6);
+  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, r);
   ctx.fill(); ctx.stroke();
+  // 进出口方向外的短管（左右各伸出 6px，与横管衔接）
+  ctx.strokeStyle = '#4dabf7';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(cx - w / 2, cy); ctx.lineTo(cx - w / 2 - 8, cy);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx + w / 2, cy); ctx.lineTo(cx + w / 2 + 8, cy);
+  ctx.stroke();
+  // 标签
   ctx.fillStyle = '#4dabf7';
   ctx.font = 'bold 12px Consolas, monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(label, x, y + 40);
+  ctx.fillText(label, cx, cy + 4);
   ctx.textAlign = 'left';
 }
 
@@ -340,12 +338,33 @@ async function setControl(name, inputId) {
 }
 
 // ===== 渲染 =====
+// canvas 显示尺寸自适应容器宽度（保持 1040:640 比例），不依赖 CSS aspect-ratio
+function fitCanvas() {
+  const cv = document.getElementById('cv');
+  const container = document.getElementById('sys');
+  const avail = container.clientWidth || CV_W;
+  scaleCanvasToDisplaySize(cv, avail, CV_W, CV_H);
+}
+
+// 让 canvas 的逻辑分辨率保持 CV_W×CV_H，显示尺寸按容器等比缩放
+function scaleCanvasToDisplaySize(canvas, availWidth, logicalW, logicalH) {
+  // canvas 逻辑分辨率固定（绘图坐标用 CV_W/CV_H）
+  if (canvas.width !== logicalW) canvas.width = logicalW;
+  if (canvas.height !== logicalH) canvas.height = logicalH;
+  // 显示尺寸 = 容器宽（等比）
+  const dispW = Math.min(availWidth, logicalW);
+  const dispH = dispW * logicalH / logicalW;
+  canvas.style.width = dispW + 'px';
+  canvas.style.height = dispH + 'px';
+}
+
 function render(data) {
   current = data;
 
   // Canvas 系统图
   const cv = document.getElementById('cv');
   const ctx = cv.getContext('2d');
+  fitCanvas();
   draw(ctx);
 
   // 控制变量输入框回显
@@ -401,6 +420,8 @@ function connectWs() {
 // 首次：HTTP 拉一次（立即显示），随后走 WebSocket
 fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
 connectWs();
+// 窗口尺寸变化时重排 canvas 显示尺寸
+window.addEventListener('resize', () => { if (current) fitCanvas(); });
 </script>
 </body>
 </html>
