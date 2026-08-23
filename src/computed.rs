@@ -94,8 +94,37 @@ impl ComputedEngine {
     }
 
     fn build(configs: &[ComputedConfig]) -> Vec<ComputedSensor> {
-        configs
-            .iter()
+        // 拓扑排序：computed 可引用其他 computed（配置顺序任意），
+        // 求值必须"被引用者先于引用者"，一轮内收敛。
+        let ids: std::collections::HashSet<&str> =
+            configs.iter().map(|c| c.sensor_id.as_str()).collect();
+        let mut order: Vec<&ComputedConfig> = Vec::with_capacity(configs.len());
+        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // 后序 DFS：先访问本节点的所有 computed 输入，再访问自身。
+        fn visit<'a>(
+            id: &'a str,
+            configs: &'a [ComputedConfig],
+            ids: &std::collections::HashSet<&str>,
+            visited: &mut std::collections::HashSet<&'a str>,
+            order: &mut Vec<&'a ComputedConfig>,
+        ) {
+            if !visited.insert(id) {
+                return;
+            }
+            if let Some(c) = configs.iter().find(|c| c.sensor_id == id) {
+                for src in c.inputs.values() {
+                    if ids.contains(src.as_str()) {
+                        visit(src, configs, ids, visited, order);
+                    }
+                }
+                order.push(c);
+            }
+        }
+        for c in configs {
+            visit(&c.sensor_id, configs, &ids, &mut visited, &mut order);
+        }
+        order
+            .into_iter()
             .map(|c| ComputedSensor::new(c.clone()).expect("validated computed builds"))
             .collect()
     }
@@ -228,5 +257,73 @@ mod tests {
         let state = store.get(&SensorId("s.computed".into())).unwrap();
         assert!(state.raw.is_none());
         assert_eq!(state.metric.unwrap().value, 42.0);
+    }
+
+    /// 阶段 7：computed 链式引用（c2 引用 c1，配置乱序）——
+    /// 拓扑排序保证一轮内收敛。
+    #[test]
+    fn engine_toposorts_chained_computed() {
+        let config = Config {
+            general: Default::default(),
+            devices: vec![DeviceConfig {
+                name: "d".into(),
+                transport: crate::config::Transport::Tcp,
+                unit_id: 1,
+                host: "127.0.0.1".into(),
+                port: 502,
+                poll_interval_ms: 100,
+                timeout_ms: 100,
+                reconnect_initial_ms: 100,
+                reconnect_max_ms: 1000,
+                serial_port: None,
+                baud_rate: None,
+                registers: vec![RegisterConfig {
+                    name: "t1".into(),
+                    sensor_id: "s.t1".into(),
+                    function: RegisterFunction::Input,
+                    address: 0,
+                    count: Some(1),
+                    value_type: ValueType::U16,
+                    word_order: WordOrder::Big,
+                    unit: None,
+                    access: crate::config::Access::Read,
+                }],
+            }],
+            pipelines: vec![],
+            // 配置顺序故意乱序：c2（引用 c1）在前，c1 在后。
+            computed: vec![
+                computed(&[("c1v", "s.c1")], "c1v + 1"), // s.c2
+                computed(&[("t1", "s.t1")], "t1 * 2"),   // s.c1
+            ],
+            endpoints: Default::default(),
+        };
+        // 改 sensor_id 以便区分：computed() 助手固定 "s.computed"，
+        // 这里直接手动构造两个带独立 id 的配置。
+        let config = Config {
+            computed: vec![
+                crate::config::ComputedConfig {
+                    sensor_id: "s.c2".into(),
+                    name: "c2".into(),
+                    unit: None,
+                    inputs: [("c1v".to_string(), "s.c1".to_string())].into(),
+                    expression: "c1v + 1".into(),
+                },
+                crate::config::ComputedConfig {
+                    sensor_id: "s.c1".into(),
+                    name: "c1".into(),
+                    unit: None,
+                    inputs: [("t1".to_string(), "s.t1".to_string())].into(),
+                    expression: "t1 * 2".into(),
+                },
+            ],
+            ..config
+        };
+        let store = store_with(&[("s.t1", 21.0)]);
+        let engine = ComputedEngine::new(&config);
+        engine.run(&store);
+        let c1 = store.get(&SensorId("s.c1".into())).unwrap();
+        assert_eq!(c1.metric.as_ref().unwrap().value, 42.0);
+        let c2 = store.get(&SensorId("s.c2".into())).unwrap();
+        assert_eq!(c2.metric.as_ref().unwrap().value, 43.0);
     }
 }

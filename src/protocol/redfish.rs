@@ -417,3 +417,129 @@ fn not_found(what: &str) -> Response {
     )
         .into_response()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    use crate::config::{Access, Config, DeviceConfig, RegisterConfig, RegisterFunction, Transport, ValueType, WordOrder};
+    use crate::protocol::WriteBroker;
+
+    fn writable_config() -> Config {
+        Config {
+            general: Default::default(),
+            devices: vec![DeviceConfig {
+                name: "pcba-01".into(),
+                transport: Transport::Tcp,
+                unit_id: 1,
+                host: "127.0.0.1".into(),
+                port: 1502,
+                poll_interval_ms: 500,
+                timeout_ms: 1000,
+                reconnect_initial_ms: 100,
+                reconnect_max_ms: 1000,
+                serial_port: None,
+                baud_rate: None,
+                registers: vec![RegisterConfig {
+                    name: "fan_duty".into(),
+                    sensor_id: "pcba-01.fan_duty".into(),
+                    function: RegisterFunction::Holding,
+                    access: Access::ReadWrite,
+                    address: 0,
+                    count: Some(1),
+                    value_type: ValueType::U16,
+                    word_order: WordOrder::Big,
+                    unit: Some("%".into()),
+                }],
+            }],
+            pipelines: vec![],
+            computed: vec![],
+            endpoints: Default::default(),
+        }
+    }
+
+    fn app() -> Router {
+        router(
+            ConfigHandle::new(writable_config(), "unused.toml".into()),
+            Arc::new(MetricStore::new()),
+            Arc::new(WriteBroker::default()),
+        )
+    }
+
+    async fn get_status(uri: &str) -> (StatusCode, String) {
+        let res = app()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let text = res.into_body().collect().await.unwrap().to_bytes().to_vec();
+        (status, String::from_utf8_lossy(&text).into_owned())
+    }
+
+    #[tokio::test]
+    async fn service_root_and_collection() {
+        let (s, body) = get_status("/redfish/v1").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(body.contains("ServiceRoot"));
+        let (s, body) = get_status("/redfish/v1/Chassis").await;
+        assert_eq!(s, StatusCode::OK);
+        assert!(body.contains("pcba-01"));
+    }
+
+    #[tokio::test]
+    async fn unknown_chassis_is_404() {
+        let (s, _) = get_status("/redfish/v1/Chassis/nope").await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = get_status("/redfish/v1/Chassis/nope/Sensors").await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+        let (s, _) = get_status("/redfish/v1/Chassis/nope/Thermal").await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn unknown_sensor_is_404() {
+        let (s, _) = get_status("/redfish/v1/Chassis/pcba-01/Sensors/nope").await;
+        assert_eq!(s, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn patch_without_reading_is_400() {
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/redfish/v1/Chassis/pcba-01/Sensors/pcba-01.fan_duty")
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn patch_writable_sensor_fails_without_broker_device() {
+        // 空 WriteBroker：设备无 poll 任务 -> 写失败 -> 503。
+        let res = app()
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/redfish/v1/Chassis/pcba-01/Sensors/pcba-01.fan_duty")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"Reading": 60}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let text = res.into_body().collect().await.unwrap().to_bytes();
+        let v: Value = serde_json::from_slice(&text).unwrap();
+        assert!(v["error"].as_str().unwrap().contains("write failed"));
+    }
+}
+

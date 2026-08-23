@@ -244,6 +244,8 @@ impl Config {
 
         // 计算（虚拟传感器）：id 唯一、引用的输入存在、
         // 表达式可解析且其变量是输入的子集、无环。
+        // 两阶段：先收集全部 computed id（允许任意顺序引用，
+        // 环由下方 DFS 检测），再逐项校验输入与表达式。
         let mut computed_ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for c in &self.computed {
             if !seen_sensors.insert(c.sensor_id.as_str()) {
@@ -261,7 +263,9 @@ impl Config {
             if c.inputs.is_empty() {
                 bail!("computed `{}`: at least one input is required", c.sensor_id);
             }
-            // 输入必须引用已存在的传感器（寄存器或更早的 computed）
+        }
+        for c in &self.computed {
+            // 输入必须引用已存在的传感器（寄存器或任意 computed）
             for (var, src) in &c.inputs {
                 if !known_sensors.contains(src.as_str()) && !computed_ids.contains(src.as_str()) {
                     bail!(
@@ -968,5 +972,87 @@ count = 1
         let cfg: Config = toml::from_str(toml).unwrap();
         let err = cfg.validate().unwrap_err().to_string();
         assert!(err.contains("count"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_computed_cycle() {
+        let toml = r#"
+[[devices]]
+name = "a"
+host = "127.0.0.1"
+[[devices.registers]]
+name = "r1"
+sensor_id = "s1"
+address = 0
+
+[[computed]]
+sensor_id = "c1"
+name = "c1"
+expression = "b + 1"
+[computed.inputs]
+b = "c2"
+
+[[computed]]
+sensor_id = "c2"
+name = "c2"
+expression = "a + 1"
+[computed.inputs]
+a = "c1"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("cycle"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_computed_unknown_input() {
+        let toml = r#"
+[[devices]]
+name = "a"
+host = "127.0.0.1"
+[[devices.registers]]
+name = "r1"
+sensor_id = "s1"
+address = 0
+
+[[computed]]
+sensor_id = "c1"
+name = "c1"
+expression = "x * 2"
+[computed.inputs]
+x = "s.does_not_exist"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("unknown sensor_id"), "got: {err}");
+    }
+
+    #[test]
+    fn accepts_chained_computed_no_cycle() {
+        let toml = r#"
+[[devices]]
+name = "a"
+host = "127.0.0.1"
+[[devices.registers]]
+name = "r1"
+sensor_id = "s1"
+address = 0
+
+[[computed]]
+sensor_id = "c1"
+name = "c1"
+expression = "v * 2"
+[computed.inputs]
+v = "s1"
+
+[[computed]]
+sensor_id = "c2"
+name = "c2"
+expression = "c1v + 1"
+[computed.inputs]
+c1v = "c1"
+"#;
+        let cfg: Config = toml::from_str(toml).unwrap();
+        cfg.validate().unwrap();
     }
 }

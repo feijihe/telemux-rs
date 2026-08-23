@@ -208,11 +208,16 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 `/healthz` 200、`/readyz` 200 且 7 传感器全部有数据、日志滚动文件生成并含 debug 样本；
 全部 62 测试通过（新增 health 3 + logging 文件写入 1），clippy 干净，dev/release/release+dashboard 三种构建均无警告。
 
-## 阶段 7 — 测试与验证 ⏳（未开始）
+## 阶段 7 — 测试与验证 ✅（已完成）
 
-- 单元测试：config 解析、管道阶段、寄存器/OID 映射。
-- 集成测试：模拟 PCBA → 网关 → 三协议查询全链路数值一致。
-- 稳定性：长时间运行 + 断线重连演练；内存占用验证（贴合"低资源开销"目标）。
+| 项 | 内容 |
+|---|---|
+| 单元测试 | config 解析（新增 computed 环检测/未知输入/链式引用）、管道阶段、寄存器/表映射、Redfish 处理器错误路径（404/400/503）、Modbus 服务层错误路径（越界读 → IllegalDataAddress、占位符、写只读 → IllegalFunction）、store 有界性（1 万次写入容量不变） |
+| 集成测试 | **全链路一致性**（`tests/full_pipeline.rs`，进程内 mock → 采集解码 → 管道 → 存储 → 协议视图/编码互逆，数值逐层断言）；RTU 帧测试；TCP 断线重连 |
+| 稳定性 | **断线重连演练**（`tests/stability.rs`：连续轮询 → 杀 mock → 换端口重启 + 热更新配置 → 一个轮询周期内自动恢复，存储有界）；内存验证（store 每传感器只保留最新值，容量恒定，贴合低资源开销目标） |
+| 修复 | computed 校验两阶段化（允许任意顺序引用，环由 DFS 检测——此前前向约束使环检测不可达）；`ComputedEngine` 拓扑排序（computed→computed 链配置乱序也能一轮收敛） |
+
+**验收**：77 个测试全绿（68 lib + 9 集成），clippy 零警告，dev/release 构建均通过；`cargo test --release` 通过。
 
 ## 阶段 8 — 打包发布 ⏳（未开始）
 
@@ -250,6 +255,6 @@ dev 面板新增寄存器后 Redfish 自动出现（count+1）、Modbus 自动�
 - [x] 阶段 4 指标存储
 - [x] 阶段 5 输出协议（Redfish + Modbus Server；SNMP 暂缓）
 - [x] 阶段 6 可观测性与运维
-- [ ] 阶段 7 测试与验证
+- [x] 阶段 7 测试与验证
 - [ ] 阶段 8 打包发布
 - [x] Dev Dashboard（两期均完成）

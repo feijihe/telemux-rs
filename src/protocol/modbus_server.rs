@@ -455,4 +455,49 @@ mod tests {
         );
         assert_eq!(encode_value(1.0, ValueType::Bool, WordOrder::Big), vec![1]);
     }
+
+    // ---- 服务层错误路径（阶段 7）----
+
+    fn state() -> ModbusState {
+        ModbusState {
+            config: ConfigHandle::new(sample_config(), "unused.toml".into()),
+            store: Arc::new(MetricStore::new()),
+            broker: Arc::new(WriteBroker::default()),
+        }
+    }
+
+    #[tokio::test]
+    async fn read_out_of_range_is_illegal_data_address() {
+        let s = state();
+        let table = build_table(&sample_config());
+        // holding 区只有 1 个字；读 2 个 -> 越界。
+        let err = s.read_words(&table.holding, 0, 2).unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
+        // 起始地址超出表长。
+        let err = s.read_words(&table.holding, 5, 1).unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalDataAddress);
+    }
+
+    #[tokio::test]
+    async fn read_missing_slot_returns_placeholder() {
+        let s = state();
+        let table = build_table(&sample_config());
+        // coils 区为空 -> 读任何地址返回 false。
+        let bits = s.read_bits(&table.coils, 0, 3);
+        assert_eq!(bits, vec![false, false, false]);
+        // holding 区无数据（store 空）-> 0xFFFF 占位。
+        let words = s.read_words(&table.holding, 0, 1).unwrap();
+        assert_eq!(words, vec![0xFFFF]);
+    }
+
+    #[tokio::test]
+    async fn write_readonly_register_is_illegal_function() {
+        let s = state();
+        let table = build_table(&sample_config());
+        // discrete_inputs[0] = leak（read）-> 写必须被拒。
+        let err = s.write_bit(&table.discrete_inputs, 0, true).await.unwrap_err();
+        assert_eq!(err, ExceptionCode::IllegalFunction);
+        // holding 区 fan_duty 是 read_write 且单字 -> 允许（broker 空设备则
+        // 转发失败，但那是 ServerDeviceFailure，不是 IllegalFunction）。
+    }
 }

@@ -179,4 +179,18 @@ mod tests {
         assert!(rx.has_changed().unwrap());
         let _ = rx.borrow_and_update();
     }
+
+    /// 稳定性（阶段 7）：长时间轮询后存储不泄漏 —— 每个传感器只保留
+    /// 最新值，容量有界（贴合"低资源开销"目标）。
+    #[test]
+    fn store_stays_bounded_under_repeated_writes() {
+        let store = MetricStore::new();
+        for i in 0..10_000u64 {
+            store.update_raw(raw("s.1", i as f64));
+            store.update_raw(raw("s.2", (i + 1) as f64));
+        }
+        assert_eq!(store.len(), 2, "容量必须保持有界");
+        let s1 = store.get(&SensorId("s.1".into())).unwrap();
+        assert_eq!(s1.raw.as_ref().unwrap().raw_value, 9999.0);
+    }
 }
