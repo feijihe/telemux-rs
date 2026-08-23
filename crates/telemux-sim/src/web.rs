@@ -1,20 +1,27 @@
 //! 网页 UI：观察模拟器所有寄存器（地址 / 类型 / 原始值）并设置控制变量。
 //!
-//! - `GET /`            — 单页仪表盘（SVG 系统图 + 表格，JS 轮询刷新）
+//! - `GET /`            — 单页仪表盘（Canvas 系统图 + 表格）
 //! - `GET /api/state`   — JSON：控制变量 + 传感器 + 寄存器地图原始值
+//! - `GET /api/ws`      — WebSocket：按间隔推送状态 JSON（与 HTTP 同一份构建）
 //! - `POST /api/control`— 设置控制变量（JSON `{"name","value"}`），立即驱动模型
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::server::SimSlaveState;
+
+/// WebSocket 推送间隔（毫秒）。
+const WS_INTERVAL_MS: u64 = 500;
 
 #[derive(Clone)]
 struct WebState {
@@ -27,6 +34,7 @@ pub fn router(slave: Arc<SimSlaveState>) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/state", get(state_json))
+        .route("/api/ws", get(ws_handler))
         .route("/api/control", post(set_control))
         .with_state(state)
 }
@@ -43,7 +51,7 @@ struct ControlBody {
 }
 
 /// 设置控制变量（如 primary_cold_temp / secondary_hot_temp / *_duty）。
-/// 成功后模型立即重算，下一次 `GET /api/state` 即返回新值。
+/// 成功后模型立即重算，下一次状态推送即返回新值。
 async fn set_control(
     State(state): State<WebState>,
     Json(body): Json<ControlBody>,
@@ -62,13 +70,43 @@ async fn set_control(
     }
 }
 
-/// 当前状态 JSON：控制变量 + 传感器（含每个传感器的 f32 原始值与解码）。
+/// WebSocket 握手：升级后按间隔推送状态，直到客户端断开。
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<WebState>) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| ws_push_loop(socket, state))
+}
+
+async fn ws_push_loop(socket: WebSocket, state: WebState) {
+    let (mut sink, mut stream) = socket.split();
+    let mut interval = tokio::time::interval(Duration::from_millis(WS_INTERVAL_MS));
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                let payload = build_state_json(&state.slave);
+                let text = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+                if sink.send(Message::Text(text.into())).await.is_err() {
+                    break;
+                }
+            }
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {} // 忽略 ping/pong/其它
+                    Some(Err(_)) => break,
+                }
+            }
+        }
+    }
+}
+
+/// `GET /api/state`（HTTP 轮询回退）。
 async fn state_json(State(state): State<WebState>) -> Json<Value> {
-    let engine = state
-        .slave
-        .engine
-        .lock()
-        .expect("sim engine lock poisoned");
+    Json(build_state_json(&state.slave))
+}
+
+/// 构建完整状态 JSON：控制变量 + 传感器 + 寄存器地图原始值。
+/// HTTP 与 WebSocket 共用，保证两条通道数据一致。
+fn build_state_json(slave: &SimSlaveState) -> Value {
+    let engine = slave.engine.lock().expect("sim engine lock poisoned");
     let config = engine.config().clone();
 
     let controls: Vec<Value> = config
@@ -101,28 +139,28 @@ async fn state_json(State(state): State<WebState>) -> Json<Value> {
         .collect();
 
     // 寄存器地图原始值：保持区（u16）+ 输入区（f32 解码）。
-    let holding: Vec<Value> = (0..state.slave.map.holding.len())
+    let holding: Vec<Value> = (0..slave.map.holding.len())
         .map(|i| {
             json!({
                 "addr": i,
-                "slot": state.slave.map.holding[i].as_ref().map(|s| json!({
+                "slot": slave.map.holding[i].as_ref().map(|s| json!({
                     "control": s.control,
                     "writable": s.writable,
                 })),
-                "raw": state.slave.map.read_holding(&engine, i),
+                "raw": slave.map.read_holding(&engine, i),
             })
         })
         .collect();
     let inputs: Vec<Value> = {
         let mut out = Vec::new();
         let mut i = 0;
-        while i < state.slave.map.inputs.len() {
-            let hi = state.slave.map.read_input(&engine, i);
-            let lo = state.slave.map.read_input(&engine, i + 1);
+        while i < slave.map.inputs.len() {
+            let hi = slave.map.read_input(&engine, i);
+            let lo = slave.map.read_input(&engine, i + 1);
             let f = f32::from_bits(((hi as u32) << 16) | lo as u32);
             out.push(json!({
                 "addr": i,
-                "sensor": state.slave.map.inputs[i].as_ref().map(|s| s.sensor_id.clone()),
+                "sensor": slave.map.inputs[i].as_ref().map(|s| s.sensor_id.clone()),
                 "raw_hi": hi,
                 "raw_lo": lo,
                 "value_f32": f,
@@ -132,10 +170,10 @@ async fn state_json(State(state): State<WebState>) -> Json<Value> {
         out
     };
 
-    Json(json!({
+    json!({
         "controls": controls,
         "sensors": sensors,
         "holding": holding,
         "inputs": inputs,
-    }))
+    })
 }

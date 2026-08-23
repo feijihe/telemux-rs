@@ -1013,6 +1013,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "futures-util",
  "meval",
  "serde",
  "serde_json",
