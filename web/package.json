@@ -10,7 +10,7 @@
     "typecheck": "pnpm -r run typecheck"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "typescript": "catalog:"
   },
   "engines": {
     "node": ">=20"
