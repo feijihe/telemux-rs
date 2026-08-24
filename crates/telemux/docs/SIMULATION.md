@@ -34,8 +34,14 @@ curl localhost:8000/redfish/v1/Chassis/cdu-01/Sensors
 
 ## 2. 模拟器配置（crates/telemux-sim/config/cdu.toml）
 
-与网关原 `[sim]` 段一致：`[[sim.controls]]`（duty，可写）+ `[[sim.sensors]]`
-（物理测量点，`formula` meval 稳态表达式 + `inputs` 显式依赖映射）。
+与网关原 `[sim]` 段一致：`[[sim.controls]]`（duty，可写）+ 传感器按回路与出入口分组。
+传感器按**回路侧 → 出入口**两级组织：
+- 一次侧（冷水回路）：`[[sim.pri.in]]`（入口）、`[[sim.pri.out]]`（出口）、`[[sim.pri.aux]]`（流量/液位等辅助）
+- 二次侧（热水回路）：`[[sim.sec.in]]`、`[[sim.sec.out]]`、`[[sim.sec.aux]]`（流量 + 泵）
+- 水箱/环境/泄漏等全局传感器用 `[[sim.sensors]]` 平铺
+
+代码层（`SimConfig.iter_sensors()`）按 **一次侧 in/out/aux → 二次侧 in/out/aux → 未分组**
+顺序扁平化，因此 Modbus 输入寄存器地址按组连续划分。
 
 ```toml
 [sim]
@@ -45,17 +51,19 @@ initial = 50
 unit = "%"
 writable = true         # true → 暴露为保持寄存器（u16 0-100），可写
 
-[[sim.sensors]]
-sensor_id = "cdu.pump1.out_p"
-name = "Pump1 Outlet Pressure"
+[[sim.pri.in]]
+sensor_id = "cdu.pri.p1"
+name = "Primary Inlet P1"
 kind = "pressure"
 unit = "kPa"
 formula = "p_in + pump1_duty^2 * 0.08"   # 离心泵扬程 ∝ duty²
-[sim.sensors.inputs]
-p_in = "cdu.pump1.in_p"
+[sim.pri.in.inputs]
+p_in = "cdu.sec.pump1.in_p"
 ```
 
 变量解析规则：`inputs` 映射 → 控制变量名 → 内置时间 `t` → 传感器短名。
+跨回路引用（如二次侧 `cdu.sec.t7` 引用一次侧 `cdu.pri.f1`）通过 `inputs` 显式映射即可。
+注意校验是**两遍**：先收集全部传感器 id，再校验 `inputs` 目标，故依赖方可以出现在被依赖方之前（分组顺序不限）。
 
 ## 3. Modbus 寄存器地图（模拟器 ↔ 网关契约）
 

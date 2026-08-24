@@ -123,19 +123,28 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         .collect();
 
     let values: std::collections::HashMap<String, f64> = engine.eval_all().into_iter().collect();
-    let sensors: Vec<Value> = config
-        .sensors
-        .iter()
-        .map(|s| {
-            json!({
-                "sensor_id": s.sensor_id,
-                "name": s.name,
-                "kind": s.kind,
-                "unit": s.unit,
-                "formula": s.formula,
-                "value": values.get(&s.sensor_id).copied(),
-            })
+    let sensor_json = |s: &crate::model::SimSensor| {
+        json!({
+            "sensor_id": s.sensor_id,
+            "name": s.name,
+            "kind": s.kind,
+            "unit": s.unit,
+            "formula": s.formula,
+            "value": values.get(&s.sensor_id).copied(),
         })
+    };
+    // 分组展示（按回路 + 出入口/辅助），供 UI 归类。
+    let group_json = |side: &crate::model::Side| json!({
+        "in": side.input.iter().map(&sensor_json).collect::<Vec<_>>(),
+        "out": side.output.iter().map(&sensor_json).collect::<Vec<_>>(),
+        "aux": side.auxiliary.iter().map(&sensor_json).collect::<Vec<_>>(),
+    });
+    let pri: Option<Value> = config.pri.as_ref().map(group_json);
+    let sec: Option<Value> = config.sec.as_ref().map(group_json);
+    // 扁平全量列表（pri + sec + 未分组），前端 canvas/表格继续按 sensor_id 使用。
+    let sensors: Vec<Value> = config
+        .iter_sensors()
+        .map(&sensor_json)
         .collect();
 
     // 寄存器地图原始值：保持区（u16）+ 输入区（f32 解码）。
@@ -172,6 +181,8 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
 
     json!({
         "controls": controls,
+        "pri": pri,
+        "sec": sec,
         "sensors": sensors,
         "holding": holding,
         "inputs": inputs,

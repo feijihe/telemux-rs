@@ -49,228 +49,218 @@ initial = 45
 unit = "°C"
 writable = true
 
-# ---- 一次侧（冷水回路）物理传感器 ----
-[[sim.sensors]]
-sensor_id = "cdu.pri.p1"
+# ===================== 一次侧（冷水回路） =====================
+
+# ---- 一次侧入口 ----
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.p1"
 name = "Primary Inlet P1"
 kind = "pressure"
 unit = "kPa"
-formula = "300 + valve1_duty * 1.2"          # 阀开度越大，一次侧进口压力越高
+formula = "300 + valve1_duty * 1.2 + 2 * sin(t/2)"          # 阀开度越大，一次侧进口压力越高
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.p2"
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.p2"
 name = "Primary Inlet P2"
 kind = "pressure"
 unit = "kPa"
-formula = "p1 - 8"                            # P2 在阀后，压损 8 kPa
-[sim.sensors.inputs]
+formula = "p1 - 8 + 1 * cos(t/3)"                            # P2 在阀后，压损 8 kPa
+[sim.pri.in.inputs]
 p1 = "cdu.pri.p1"
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.t1"
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.t1"
 name = "Primary Inlet T1 (cold)"
 kind = "temperature"
 unit = "°C"
 formula = "primary_cold_temp + 0.5 * sin(t)"   # 冷水供水温度（网页可设），缓慢波动
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.t2"
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.t2"
 name = "Primary Inlet T2"
 kind = "temperature"
 unit = "°C"
-formula = "t1 + 0.3"                          # 略高于进口
-[sim.sensors.inputs]
+formula = "t1 + 0.3 + 0.15 * sin(t/4)"                          # 略高于进口
+[sim.pri.in.inputs]
 t1 = "cdu.pri.t1"
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.f1"
-name = "Primary Flow F1"
-kind = "flow"
-unit = "L/min"
-formula = "8 + valve1_duty * 0.9"            # 比例阀开度↑ → 一次侧流量↑
-
-[[sim.sensors]]
-sensor_id = "cdu.pri.p3"
+# ---- 一次侧出口 ----
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.p3"
 name = "Primary Outlet P3"
 kind = "pressure"
 unit = "kPa"
-formula = "p2 - f1 * 0.05"                   # 板换一次侧压损随流量
-[sim.sensors.inputs]
+formula = "p2 - f1 * 0.05 + 0.8 * sin(t/2)"                   # 板换一次侧压损随流量
+[sim.pri.out.inputs]
 p2 = "cdu.pri.p2"
 f1 = "cdu.pri.f1"
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.p4"
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.p4"
 name = "Primary Outlet P4"
 kind = "pressure"
 unit = "kPa"
-formula = "p3 - 4"
-[sim.sensors.inputs]
+formula = "p3 - 4 + 0.5 * cos(t/2)"
+[sim.pri.out.inputs]
 p3 = "cdu.pri.p3"
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.t3"
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.t3"
 name = "Primary Outlet T3 (warmed)"
 kind = "temperature"
 unit = "°C"
-formula = "t1 + f1 * 0.35"                   # 冷水经板换被二次侧加热升温
-[sim.sensors.inputs]
+formula = "t1 + f1 * 0.35 + 0.2 * sin(t/3)"                   # 冷水经板换被二次侧加热升温
+[sim.pri.out.inputs]
 t1 = "cdu.pri.t1"
 f1 = "cdu.pri.f1"
 
-[[sim.sensors]]
-sensor_id = "cdu.pri.t4"
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.t4"
 name = "Primary Outlet T4"
 kind = "temperature"
 unit = "°C"
-formula = "t3 + 0.2"
-[sim.sensors.inputs]
+formula = "t3 + 0.2 + 0.1 * cos(t/4)"
+[sim.pri.out.inputs]
 t3 = "cdu.pri.t3"
 
-[[sim.sensors]]
+# ---- 一次侧辅助（非入口也非出口）----
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.f1"
+name = "Primary Flow F1"
+kind = "flow"
+unit = "L/min"
+formula = "8 + valve1_duty * 0.9 + 0.6 * cos(t)"            # 比例阀开度↑ → 一次侧流量↑
+
+[[sim.pri.aux]]
 sensor_id = "cdu.pri.l1"
 name = "Primary Level L1"
 kind = "level"
 unit = "%"
-formula = "85"                                # 一次侧缓冲罐液位固定
+formula = "85 + 0.4 * sin(t/5)"                                # 一次侧缓冲罐液位固定
 
-# ---- 二次侧（热水回路）物理传感器 ----
-[[sim.sensors]]
-sensor_id = "cdu.sec.f2"
-name = "Secondary Flow F2"
-kind = "flow"
-unit = "L/min"
-formula = "10 + (pump1_duty + pump2_duty) * 1.1"   # 两泵并联，总流量∝Σduty
+# ===================== 二次侧（热水回路） =====================
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.p5"
+# ---- 二次侧入口（服务器回水）----
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.p5"
 name = "From Server P5"
 kind = "pressure"
 unit = "kPa"
-formula = "180 + pump1_duty * 1.0 + pump2_duty * 0.9"  # 服务器回水压力随泵出力
+formula = "180 + pump1_duty * 1.0 + pump2_duty * 0.9 + 1.5 * cos(t/2)"  # 服务器回水压力随泵出力
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.p6"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.p6"
 name = "From Server P6"
 kind = "pressure"
 unit = "kPa"
-formula = "p5 - 10"
-[sim.sensors.inputs]
+formula = "p5 - 10 + 1.2 * sin(t/3)"
+[sim.sec.in.inputs]
 p5 = "cdu.sec.p5"
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.t5"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.t5"
 name = "From Server T5 (hot return)"
 kind = "temperature"
 unit = "°C"
-formula = "secondary_hot_temp - 3 * (1 - fan_duty / 100)"  # 热水回水（网页可设），风扇越强越接近
+formula = "secondary_hot_temp - 3 * (1 - fan_duty / 100) + 0.4 * sin(t/3)"  # 热水回水（网页可设），风扇越强越接近
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.t6"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.t6"
 name = "From Server T6"
 kind = "temperature"
 unit = "°C"
-formula = "t5 + 0.4"
-[sim.sensors.inputs]
+formula = "t5 + 0.4 + 0.2 * cos(t/4)"
+[sim.sec.in.inputs]
 t5 = "cdu.sec.t5"
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.p7"
+# ---- 二次侧出口（服务器供水）----
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.p7"
 name = "To Server P7"
 kind = "pressure"
 unit = "kPa"
-formula = "220 + (pump1_duty + pump2_duty) * 1.3"    # 泵出口侧压力更高
+formula = "220 + (pump1_duty + pump2_duty) * 1.3 + 1.8 * sin(t/2)"    # 泵出口侧压力更高
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.p8"
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.p8"
 name = "To Server P8"
 kind = "pressure"
 unit = "kPa"
-formula = "p7 - 12"
-[sim.sensors.inputs]
+formula = "p7 - 12 + 1.3 * cos(t/3)"
+[sim.sec.out.inputs]
 p7 = "cdu.sec.p7"
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.t7"
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.t7"
 name = "To Server T7 (cooled supply)"
 kind = "temperature"
 unit = "°C"
-formula = "t5 - f1 * 0.18"                    # ★ 一次侧冷水流量↑ → 二次侧供水降温
-[sim.sensors.inputs]
+formula = "t5 - f1 * 0.18 + 0.3 * sin(t/4)"                    # ★ 一次侧冷水流量↑ → 二次侧供水降温
+[sim.sec.out.inputs]
 t5 = "cdu.sec.t5"
 f1 = "cdu.pri.f1"
 
-[[sim.sensors]]
-sensor_id = "cdu.sec.t8"
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.t8"
 name = "To Server T8"
 kind = "temperature"
 unit = "°C"
-formula = "t7 + 0.3"
-[sim.sensors.inputs]
+formula = "t7 + 0.3 + 0.15 * cos(t/5)"
+[sim.sec.out.inputs]
 t7 = "cdu.sec.t7"
 
-# ---- 泵与水箱 ----
-[[sim.sensors]]
-sensor_id = "cdu.pump1.in_p"
-name = "Pump1 Inlet Pressure"
-kind = "pressure"
-unit = "kPa"
-formula = "190 + pump1_duty * 0.5"
+# ---- 二次侧辅助（流量 + 泵，非入口也非出口）----
+[[sim.sec.out]
+sensor_id = "cdu.sec.out.f2"
+name = "Secondary Flow F2"
+kind = "flow"
+unit = "L/min"
+formula = "10 + (pump1_duty + pump2_duty) * 1.1 + 0.7 * sin(t)"   # 两泵并联，总流量∝Σduty
 
-[[sim.sensors]]
-sensor_id = "cdu.pump1.out_p"
-name = "Pump1 Outlet Pressure"
-kind = "pressure"
-unit = "kPa"
-formula = "p_in + pump1_duty^2 * 0.08"        # 离心泵扬程 ∝ duty²
-[sim.sensors.inputs]
-p_in = "cdu.pump1.in_p"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.pump1.speed"
+name = "Pump1 Speed"
+kind = "pump"
+unit = "rpm"
+formula = "pump1_duty * 60 + 3 * sin(t)"
 
-[[sim.sensors]]
-sensor_id = "cdu.pump2.in_p"
-name = "Pump2 Inlet Pressure"
-kind = "pressure"
-unit = "kPa"
-formula = "185 + pump2_duty * 0.5"
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.in.pump1.current"
+name = "Pump1 Current"
+kind = "pump"
+unit = "A"
+formula = "pump1_duty * 0.65 + 0.03 * cos(t)"        # 离心泵扬程 ∝ duty²
 
-[[sim.sensors]]
-sensor_id = "cdu.pump2.out_p"
-name = "Pump2 Outlet Pressure"
-kind = "pressure"
-unit = "kPa"
-formula = "p_in + pump2_duty^2 * 0.08"
-[sim.sensors.inputs]
-p_in = "cdu.pump2.in_p"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.pump2.speed"
+name = "Pump2 Speed"
+kind = "pump"
+unit = "rpm"
+formula = "pump2_duty * 60 + 3 * cos(t/2)"
 
-[[sim.sensors]]
-sensor_id = "cdu.tank.p9"
-name = "Tank P9"
-kind = "pressure"
-unit = "kPa"
-formula = "175 + pump1_duty * 0.3"
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.pump2.current"
+name = "Pump2 Current"
+kind = "pump"
+unit = "A"
+formula = "pump2_duty * 0.65 + 0.03 * sin(t)"
 
-[[sim.sensors]]
-sensor_id = "cdu.tank.p10"
-name = "Tank P10"
-kind = "pressure"
-unit = "kPa"
-formula = "p9 - 3"
-[sim.sensors.inputs]
-p9 = "cdu.tank.p9"
+# ===================== 全局未分组（水箱/环境/泄漏） =====================
 
+# ---- 水箱 ----
 [[sim.sensors]]
 sensor_id = "cdu.tank.level"
 name = "Tank Level LL1"
 kind = "level"
 unit = "%"
-formula = "78"                                # 膨胀水箱液位
+formula = "78 + 0.5 * sin(t/4)"                                # 膨胀水箱液位
 
 [[sim.sensors]]
 sensor_id = "cdu.tank.ph"
 name = "Tank PH1"
 kind = "ph"
 unit = "pH"
-formula = "8.2"                               # 冷却液 pH
+formula = "8.2 + 0.05 * sin(t/5)"                               # 冷却液 pH
 
 # ---- 环境与泄漏 ----
 [[sim.sensors]]
@@ -278,18 +268,18 @@ sensor_id = "cdu.env.temp"
 name = "Ambient Temp"
 kind = "temperature"
 unit = "°C"
-formula = "25"
+formula = "25 + 0.3 * cos(t/3)"
 
 [[sim.sensors]]
 sensor_id = "cdu.env.rh"
 name = "Ambient RH"
 kind = "humidity"
 unit = "%"
-formula = "45"
+formula = "45 + 0.5 * sin(t/4)"
 
 [[sim.sensors]]
 sensor_id = "cdu.leak"
 name = "Leak Sensor"
 kind = "leak"
 unit = "leak"
-formula = "0"                                 # 0 = 无泄漏
+formula = "0"                                 # 0 = 无泄漏（逻辑量，保持静态）

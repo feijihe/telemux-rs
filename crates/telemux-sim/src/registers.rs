@@ -45,7 +45,7 @@ impl RegisterMap {
                 writable: c.writable,
             }));
         }
-        for s in &sim.sensors {
+        for s in sim.iter_sensors() {
             // f32 双字：高字在前（Big）。
             map.inputs.push(Some(InputSlot {
                 sensor_id: s.sensor_id.clone(),
@@ -108,6 +108,8 @@ mod tests {
                 formula: "300 + pump1_duty * 1.2".into(), // 360
                 inputs: Default::default(),
             }],
+            pri: None,
+            sec: None,
         }
     }
 

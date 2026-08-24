@@ -119,9 +119,9 @@ const SENSOR_POS = {
   "cdu.tank.level":  {x: 600, y: 90,  label: "LL1"},
   "cdu.tank.ph":     {x: 600, y: 130, label: "PH1"},
   // 环境 / 泄漏（右下）
-  "cdu.env.temp":    {x: 890, y: 560, label: "环境 T"},
-  "cdu.env.rh":      {x: 890, y: 595, label: "环境 RH"},
-  "cdu.leak":        {x: 890, y: 610, label: "LEAK"},
+  "cdu.env.temp":    {x: 890, y: 460, label: "环境 T"},
+  "cdu.env.rh":      {x: 890, y: 495, label: "环境 RH"},
+  "cdu.leak":        {x: 890, y: 525, label: "LEAK"},
 };
 
 const KIND_COLOR = COL; // 复用配色
@@ -131,7 +131,7 @@ let current = null; // 最近一次状态
 // 从 current.controls 取控制变量当前值（无则 0）
 function controlValue(name) {
   if (current) {
-    const c = current.controls.find(x => x.name === name);
+    const c = current.sensors.find(x => x.sensor_id === name);
     if (c) return c.value;
   }
   return 0;
@@ -205,8 +205,8 @@ function draw(ctx) {
   ctx.fillText('板式换热器', 405, 256);
 
   // ---- 泵（并联环上：泵2 在顶横管、泵1 在下管主线）——只显示转速(duty)----
-  const duty1 = controlValue('pump1_duty');
-  const duty2 = controlValue('pump2_duty');
+  const duty1 = controlValue('cdu.sec.pump1.speed');
+  const duty2 = controlValue('cdu.sec.pump2.speed');
   drawPump(ctx, 600, 268, '泵2', duty2);
   drawPump(ctx, 600, 390, '泵1', duty1);
 

@@ -16,9 +16,29 @@ pub struct SimConfig {
     /// 控制变量（泵/阀/风扇 duty 等），可被 Modbus 写入以驱动仿真。
     #[serde(default)]
     pub controls: Vec<SimControl>,
-    /// 仿真传感器：每个通过 formula 表达式从控制变量与其他传感器求值。
+    /// 未归组传感器（水箱/环境/泄漏等，即 `[[sim.sensors]]`）。
     #[serde(default)]
     pub sensors: Vec<SimSensor>,
+    /// 一次侧（冷水回路）传感器组（`[sim.pri]`，含 in/out/aux）。
+    #[serde(default)]
+    pub pri: Option<Side>,
+    /// 二次侧（热水回路）传感器组（`[sim.sec]`，含 in/out/aux）。
+    #[serde(default)]
+    pub sec: Option<Side>,
+}
+
+/// 回路侧（一次/二次）传感器组：按出入口 + 辅助三组划分。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Side {
+    /// 入口传感器（`[[sim.pri.in]]` 等）。
+    #[serde(default, rename = "in")]
+    pub input: Vec<SimSensor>,
+    /// 出口传感器（`[[sim.pri.out]]` 等）。
+    #[serde(default, rename = "out")]
+    pub output: Vec<SimSensor>,
+    /// 辅助传感器——非入口也非出口（`[[sim.pri.aux]]` 等）。
+    #[serde(default, rename = "aux")]
+    pub auxiliary: Vec<SimSensor>,
 }
 
 /// 仿真控制变量（如 pump1_duty，0-100）。
@@ -40,7 +60,7 @@ pub struct SimControl {
 /// 仿真传感器：由稳态表达式求值，作为测量值产出。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimSensor {
-    /// 唯一标识（如 "cdu.pump1.out_p"）。
+    /// 唯一标识（如 "cdu.sec.pump1.speed"）。
     pub sensor_id: String,
     /// 显示名称。
     pub name: String,
@@ -66,6 +86,23 @@ pub struct SimSensor {
 }
 
 impl SimConfig {
+    /// 惰性迭代全部传感器（一次侧 in/out/aux → 二次侧 in/out/aux → 未分组）。
+    ///
+    /// 该顺序与配置逻辑一致，从而寄存器地址按组连续划分。
+    pub fn iter_sensors(&self) -> impl Iterator<Item = &SimSensor> {
+        fn side_sensors(side: &Side) -> impl Iterator<Item = &SimSensor> {
+            side.input
+                .iter()
+                .chain(side.output.iter())
+                .chain(side.auxiliary.iter())
+        }
+        self.pri
+            .iter()
+            .flat_map(side_sensors)
+            .chain(self.sec.iter().flat_map(side_sensors))
+            .chain(self.sensors.iter())
+    }
+
     /// 从 TOML 文件加载并校验。文件顶层为 `[sim]` 表（与网关原配置一致）。
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let text = std::fs::read_to_string(path)
@@ -91,10 +128,14 @@ impl SimConfig {
             }
         }
         let mut ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for s in &self.sensors {
+        // 第一遍：收集全部传感器 id（分组顺序可能使依赖方先于被依赖方出现）。
+        for s in self.iter_sensors() {
             if !ids.insert(s.sensor_id.as_str()) {
                 anyhow::bail!("duplicate sim sensor_id `{}`", s.sensor_id);
             }
+        }
+        // 第二遍：校验 name/formula/inputs 目标。
+        for s in self.iter_sensors() {
             if s.name.is_empty() {
                 anyhow::bail!("sim sensor `{}`: name is required", s.sensor_id);
             }
@@ -137,8 +178,7 @@ impl SimEngine {
             .map(|c| (c.name.clone(), c.initial))
             .collect();
         let exprs = sim
-            .sensors
-            .iter()
+            .iter_sensors()
             .filter_map(|s| {
                 meval::Expr::from_str(&s.formula)
                     .ok()
@@ -193,7 +233,7 @@ impl SimEngine {
             tracing::warn!("sim: cyclic dependency at `{sensor_id}`");
             return None;
         }
-        let sensor = self.sim.sensors.iter().find(|s| s.sensor_id == sensor_id)?;
+        let sensor = self.sim.iter_sensors().find(|s| s.sensor_id == sensor_id)?;
         let expr = self.exprs.get(sensor_id)?;
 
         visiting.push(sensor_id.to_string());
@@ -264,7 +304,7 @@ impl SimEngine {
         if target == "t" {
             return Some(self.start.elapsed().as_secs_f64());
         }
-        if self.sim.sensors.iter().any(|s| s.sensor_id == target) {
+        if self.sim.iter_sensors().any(|s| s.sensor_id == target) {
             return self.eval(target, memo, visiting);
         }
         tracing::warn!("sim: inputs references unknown target `{target}`");
@@ -274,8 +314,7 @@ impl SimEngine {
     /// 把公式里引用的名字解析为仿真传感器短名（sensor_id 末段）。
     fn resolve_sensor(&self, name: &str) -> Option<String> {
         self.sim
-            .sensors
-            .iter()
+            .iter_sensors()
             .find(|s| short_name(&s.sensor_id) == name)
             .map(|s| s.sensor_id.clone())
     }
@@ -285,8 +324,7 @@ impl SimEngine {
         let mut memo: HashMap<String, f64> = HashMap::new();
         let mut visiting: Vec<String> = Vec::new();
         self.sim
-            .sensors
-            .iter()
+            .iter_sensors()
             .filter_map(|s| {
                 let v = self.eval(&s.sensor_id, &mut memo, &mut visiting)?;
                 Some((s.sensor_id.clone(), v))
@@ -376,6 +414,8 @@ mod tests {
                     inputs: [("f1_flow".to_string(), "cdu.f1_flow".to_string())].into(),
                 },
             ],
+            pri: None,
+            sec: None,
         }
     }
 
@@ -411,5 +451,21 @@ mod tests {
         let mut sim = sim_config();
         sim.sensors[0].inputs = [("x".to_string(), "s.nope".to_string())].into();
         assert!(sim.validate().is_err());
+    }
+
+    #[test]
+    fn loads_grouped_cdu_config() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/cdu.toml");
+        let cfg = SimConfig::load(&path).expect("load cdu.toml");
+        let pri = cfg.pri.as_ref().expect("pri present");
+        let sec = cfg.sec.as_ref().expect("sec present");
+        // in/out/aux 三组均有传感器。
+        assert!(!pri.input.is_empty() && !pri.output.is_empty() && !pri.auxiliary.is_empty());
+        assert!(!sec.input.is_empty() && !sec.output.is_empty() && !sec.auxiliary.is_empty());
+        assert!(!cfg.sensors.is_empty()); // 水箱/环境/泄漏等全局未分组
+        // 全量求值无环无错。
+        let engine = SimEngine::new(cfg);
+        let all = engine.eval_all();
+        assert_eq!(all.len(), engine.config().iter_sensors().count());
     }
 }
