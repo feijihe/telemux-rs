@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@telemux/ui";
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@telemux/ui";
+import { Fan, Thermometer, Waves } from "lucide-react";
 import type { SimState } from "@telemux/ui";
 import { setControl } from "../hooks/useSimState";
 
@@ -11,15 +12,15 @@ interface FieldDef {
 }
 
 const TEMP_FIELDS: FieldDef[] = [
-  { control: "primary_cold_temp", label: "一次侧冷水 T1 (°C)", unit: "°C", step: 0.5 },
-  { control: "secondary_hot_temp", label: "二次侧热水 T5 (°C)", unit: "°C", step: 0.5 },
+  { control: "primary_cold_temp", label: "一次侧冷水 T1", unit: "°C", step: 0.5 },
+  { control: "secondary_hot_temp", label: "二次侧热水 T5", unit: "°C", step: 0.5 },
 ];
 
 const DUTY_FIELDS: FieldDef[] = [
-  { control: "pump1_duty", label: "Pump1 duty (%)", unit: "%", step: 1 },
-  { control: "pump2_duty", label: "Pump2 duty (%)", unit: "%", step: 1 },
-  { control: "valve1_duty", label: "Valve1 duty (%)", unit: "%", step: 1 },
-  { control: "fan_duty", label: "Fan duty (%)", unit: "%", step: 1 },
+  { control: "pump1_duty", label: "Pump1 duty", unit: "%", step: 1 },
+  { control: "pump2_duty", label: "Pump2 duty", unit: "%", step: 1 },
+  { control: "valve1_duty", label: "Valve1 duty", unit: "%", step: 1 },
+  { control: "fan_duty", label: "Fan duty", unit: "%", step: 1 },
 ];
 
 function FieldRow({ def, value }: { def: FieldDef; value: number }) {
@@ -39,7 +40,7 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
 
   return (
     <div className="flex items-center gap-2 py-1">
-      <Label className="w-44 shrink-0 text-xs">{def.label}</Label>
+      <Label className="w-36 shrink-0 text-xs text-muted-foreground">{def.label}</Label>
       <Input
         type="number"
         step={def.step}
@@ -52,10 +53,10 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
           if (e.key === "Enter") void apply();
         }}
       />
-      <Button type="button" size="sm" onClick={() => void apply()}>
+      <Button type="button" size="sm" variant="secondary" onClick={() => void apply()}>
         应用
       </Button>
-      <Badge variant="outline" className="font-mono text-emerald-600">
+      <Badge variant="outline" className="w-20 justify-end font-mono tabular-nums">
         {value} {def.unit}
       </Badge>
     </div>
@@ -66,22 +67,36 @@ export function ControlPanel({ state }: { state: SimState }) {
   const controlValue = (name: string) => state.controls.find((c) => c.name === name)?.value ?? 0;
 
   return (
-    <div className="flex flex-wrap gap-4">
+    <div className="grid gap-4 lg:grid-cols-2">
       <Card>
-        <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-sm">温度设定（立即生效）</CardTitle>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Thermometer className="size-4 text-primary" />
+            温度设定（立即生效）
+          </CardTitle>
+          <CardDescription className="text-xs">设定一次侧冷水与二次侧热水目标温度。</CardDescription>
         </CardHeader>
-        <CardContent className="p-4 pt-1">
+        <CardContent>
           {TEMP_FIELDS.map((f) => (
             <FieldRow key={f.control} def={f} value={controlValue(f.control)} />
           ))}
         </CardContent>
       </Card>
+
       <Card>
-        <CardHeader className="p-4 pb-2">
-          <CardTitle className="text-sm">运行控制</CardTitle>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Waves className="size-4 text-primary" />
+            运行控制
+          </CardTitle>
+          <CardDescription className="text-xs">
+            <span className="flex items-center gap-1">
+              <Fan className="size-3" />
+              泵/阀/风扇开度（0-100%）
+            </span>
+          </CardDescription>
         </CardHeader>
-        <CardContent className="p-4 pt-1">
+        <CardContent>
           {DUTY_FIELDS.map((f) => (
             <FieldRow key={f.control} def={f} value={controlValue(f.control)} />
           ))}

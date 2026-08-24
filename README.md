@@ -47,6 +47,10 @@ telemux-rs/
 组织在 `web/` pnpm workspace 中；构建产物输出到各 crate 的 `web/dist`，
 由 Rust 侧 `include_dir!` **编译期嵌入**（release 二进制自包含，支持 SPA history 回退）。
 
+共享组件由 shadcn CLI 管理：`components.json` 位于 `web/packages/ui/`（nova 主题、
+radix base），组件源码在 `packages/ui/src/components/ui/`，用
+`npx shadcn@latest add <component> -c packages/ui` 添加/更新。
+
 ```bash
 # 1. 构建前端（输出到 crates/*/web/dist）
 cd web && pnpm install && pnpm run build && cd ..

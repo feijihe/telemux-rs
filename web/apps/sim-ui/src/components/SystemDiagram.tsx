@@ -274,7 +274,7 @@ export function SystemDiagram({ state }: { state: SimState }) {
   }, [state]);
 
   return (
-    <div className="w-full max-w-full overflow-hidden rounded-lg border">
+    <div className="w-full max-w-full overflow-hidden rounded-lg border bg-card shadow-sm">
       <canvas ref={canvasRef} className="block max-w-full" />
     </div>
   );

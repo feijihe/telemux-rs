@@ -10,7 +10,13 @@ import {
   Input,
   Label,
   Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
 } from "@telemux/ui";
+import { Plus, Trash2 } from "lucide-react";
 import type { CreateRegisterRequest } from "@telemux/ui";
 
 const STAGE_TYPES = ["scale", "sliding_average", "median", "math", "threshold", "aggregate"];
@@ -191,36 +197,45 @@ export function RegisterModal({
           <DialogDescription>配置一个寄存器并（可选）绑定处理管道。</DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-          <div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+          <div className="flex flex-col gap-1.5">
             <Label>设备</Label>
-            <Select className="mt-1" value={device} onChange={(e) => setDevice(e.target.value)}>
-              {devices.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
+            <Select value={device} onValueChange={setDevice}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择设备" />
+              </SelectTrigger>
+              <SelectContent>
+                {devices.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>寄存器名称</Label>
-            <Input className="mt-1" placeholder="如 volt_raw" value={name} onChange={(e) => setName(e.target.value)} />
+            <Input placeholder="如 volt_raw" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>sensor_id（全局唯一）</Label>
-            <Input className="mt-1" placeholder="如 pcba-01.volt" value={sensor} onChange={(e) => setSensor(e.target.value)} />
+            <Input placeholder="如 pcba-01.volt" value={sensor} onChange={(e) => setSensor(e.target.value)} />
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>功能码</Label>
-            <Select className="mt-1" value={fn} onChange={(e) => setFn(e.target.value)}>
-              <option value="holding">holding</option>
-              <option value="input">input</option>
+            <Select value={fn} onValueChange={setFn}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="holding">holding</SelectItem>
+                <SelectItem value="input">input</SelectItem>
+              </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>起始地址</Label>
             <Input
-              className="mt-1"
               type="number"
               min={0}
               max={65535}
@@ -228,74 +243,88 @@ export function RegisterModal({
               onChange={(e) => setAddress(e.target.value)}
             />
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>数值类型</Label>
-            <Select className="mt-1" value={valueType} onChange={(e) => setValueType(e.target.value)}>
-              {["u16", "i16", "u32", "i32", "f32"].map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
+            <Select value={valueType} onValueChange={setValueType}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["u16", "i16", "u32", "i32", "f32"].map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>字序（多寄存器）</Label>
-            <Select className="mt-1" value={wordOrder} onChange={(e) => setWordOrder(e.target.value)}>
-              <option value="big">big</option>
-              <option value="little">little</option>
+            <Select value={wordOrder} onValueChange={setWordOrder}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="big">big</SelectItem>
+                <SelectItem value="little">little</SelectItem>
+              </SelectContent>
             </Select>
           </div>
-          <div>
+          <div className="flex flex-col gap-1.5">
             <Label>单位（可选）</Label>
-            <Input className="mt-1" placeholder="如 mV" value={unit} onChange={(e) => setUnit(e.target.value)} />
+            <Input placeholder="如 mV" value={unit} onChange={(e) => setUnit(e.target.value)} />
           </div>
-          <div className="col-span-2">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={pipelineOn} onChange={(e) => setPipelineOn(e.target.checked)} />
-              配置处理管道（原始值 → 计算值）
-            </label>
+          <div className="col-span-2 flex items-center gap-2">
+            <Switch id="pipeline-switch" checked={pipelineOn} onCheckedChange={setPipelineOn} />
+            <Label htmlFor="pipeline-switch">配置处理管道（原始值 → 计算值）</Label>
           </div>
         </div>
 
         {pipelineOn && (
-          <div className="mt-2">
+          <div className="flex flex-col gap-3">
             {stages.map((st) => (
-              <div key={st.id} className="mb-2 rounded-lg border p-3">
+              <div key={st.id} className="rounded-lg border p-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <Select
-                    className="w-48"
-                    value={st.type}
-                    onChange={(e) => patchStage(st.id, { type: e.target.value })}
-                  >
-                    {STAGE_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
+                  <Select value={st.type} onValueChange={(v) => patchStage(st.id, { type: v })}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STAGE_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                   <Button variant="outline" size="sm" onClick={() => setStages((s) => s.filter((x) => x.id !== st.id))}>
+                    <Trash2 data-icon="inline-start" />
                     删除
                   </Button>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   {stageParams(st.type).map((p) => (
-                    <div key={p.name}>
+                    <div key={p.name} className="flex flex-col gap-1">
                       <Label className="text-xs">{p.label}</Label>
                       {p.type === "select" ? (
                         <Select
-                          className="mt-1 h-8"
                           value={st.values[p.name] ?? p.def}
-                          onChange={(e) => patchStage(st.id, { values: { ...st.values, [p.name]: e.target.value } })}
+                          onValueChange={(v) => patchStage(st.id, { values: { ...st.values, [p.name]: v } })}
                         >
-                          {p.options?.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {p.options?.map((o) => (
+                              <SelectItem key={o} value={o}>
+                                {o}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
                         </Select>
                       ) : (
                         <Input
-                          className="mt-1 h-8"
+                          className="h-8"
                           type={p.type === "number" ? "number" : "text"}
                           min={p.min}
                           step={p.step}
@@ -308,21 +337,28 @@ export function RegisterModal({
                 </div>
               </div>
             ))}
-            <Button variant="outline" size="sm" onClick={addStage}>
-              ＋ 添加 stage
+            <Button variant="outline" size="sm" onClick={addStage} className="self-start">
+              <Plus data-icon="inline-start" />
+              添加 stage
             </Button>
           </div>
         )}
 
-        {err && <div className="whitespace-pre-wrap rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-600">{err}</div>}
-        {ok && <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-600">{ok}</div>}
+        {err && (
+          <div className="whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+            {err}
+          </div>
+        )}
+        {ok && (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-700">{ok}</div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             取消
           </Button>
           <Button onClick={() => void submit()} disabled={busy}>
-            提交
+            {busy ? "提交中…" : "提交"}
           </Button>
         </DialogFooter>
       </DialogContent>

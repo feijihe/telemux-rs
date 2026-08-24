@@ -1,4 +1,4 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@telemux/ui";
+import { Badge, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@telemux/ui";
 import type { SimState } from "@telemux/ui";
 
 const hex = (n: number) => `0x${n.toString(16).padStart(4, "0")}`;
@@ -19,22 +19,30 @@ export function RegisterTable({ state }: { state: SimState }) {
         <TableBody>
           {state.holding.map((h) => (
             <TableRow key={`h-${h.addr}`}>
-              <TableCell>保持</TableCell>
+              <TableCell>
+                <Badge variant="outline" className="font-normal">
+                  保持
+                </Badge>
+              </TableCell>
               <TableCell className="font-mono text-muted-foreground">{hex(h.addr)}</TableCell>
-              <TableCell>{h.slot ? h.slot.control : "空"}</TableCell>
-              <TableCell className="font-mono">{h.raw}</TableCell>
+              <TableCell>{h.slot ? h.slot.control : <span className="text-muted-foreground">空</span>}</TableCell>
+              <TableCell className="font-mono tabular-nums">{h.raw}</TableCell>
               <TableCell>{h.slot ? (h.slot.writable ? "可写 u16" : "只读 u16") : "—"}</TableCell>
             </TableRow>
           ))}
           {state.inputs.map((inp) => (
             <TableRow key={`i-${inp.addr}`}>
-              <TableCell>输入</TableCell>
+              <TableCell>
+                <Badge variant="secondary" className="font-normal">
+                  输入
+                </Badge>
+              </TableCell>
               <TableCell className="font-mono text-muted-foreground">{hex(inp.addr)}</TableCell>
-              <TableCell>{inp.sensor ?? "空"}</TableCell>
-              <TableCell className="font-mono">
+              <TableCell>{inp.sensor ?? <span className="text-muted-foreground">空</span>}</TableCell>
+              <TableCell className="font-mono tabular-nums">
                 {inp.raw_hi} {inp.raw_lo}
               </TableCell>
-              <TableCell className="font-mono">{inp.value_f32.toFixed(3)}</TableCell>
+              <TableCell className="font-mono tabular-nums">{inp.value_f32.toFixed(3)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
