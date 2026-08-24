@@ -22,7 +22,7 @@
 | 实现时机 | **分两期**：第一期只显示原始值（已完成）；阶段 3/4 完成后扩展计算值列 |
 | 数据来源 | 寄存器配置直接读 `Config`；原始值来自 `RawSampleStore`（`src/store.rs`，不门控，阶段 4 演进为完整 metric store） |
 | 推送机制 | 后台任务按最小 poll 间隔（下限 250ms）读 Store 快照 → `tokio::sync::broadcast` → 推送全量 JSON 给所有 WS 客户端 |
-| 前端形态 | 单个内嵌 HTML（`include_str!` 于 `src/dashboard/index.html`），原生 JS，无前端工具链 |
+| 前端形态 | **React + TypeScript + shadcn/ui**（`web/apps/dashboard`，pnpm workspace），构建产物 `web/dist` 由 `include_dir!` 编译期嵌入（`src/dashboard/web_assets.rs`，SPA history 回退）；未构建时 build.rs 生成占位页。开发时 `pnpm --filter dashboard dev`（vite，端口 5181，代理 `/api`→8080） |
 | 绑定 | `127.0.0.1:8080`（仅本机，无鉴权；`--dashboard-port` 可覆盖） |
 | 依赖（实现时调整） | axum/serde_json/futures-util 为**常驻依赖**而非 optional：cargo 无法按 profile 启用 optional 依赖（debug 下模块编译但依赖不在图内会报错）。面板模块仍由 cfg 严格门控，release 产物不含面板代码（已验证：无相关字符串、端口不监听）；axum 亦为阶段 5 所需 |
 

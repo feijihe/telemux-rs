@@ -28,6 +28,10 @@ telemux-rs/
     └── telemux-sim/         # CDU 仿真器：物理模型 + Modbus-TCP 从站 + 网页 UI
         ├── src/             # model/registers/server/web + main
         └── config/cdu.toml  # 仿真 CDU 配置（传感器布局 + 物理因果）
+    └── web/                 # 前端 pnpm workspace（React + TS + shadcn/ui）
+        ├── apps/sim-ui      # 模拟器网页 UI → crates/telemux-sim/web/dist
+        ├── apps/dashboard   # 网关 dev dashboard → crates/telemux/web/dist
+        └── packages/ui      # 共享 shadcn/ui 组件 + 类型
 ```
 
 ## workspace（monorepo）
@@ -37,7 +41,34 @@ telemux-rs/
 经字符串级验证**不含任何仿真代码**；模拟器作为独立进程以 Modbus-TCP 从站暴露寄存器地
 址，供网关读取与控制（与连接真实 CDU 完全同构）。
 
-## Building
+## Building（前端 + 后端）
+
+两个前端（模拟器 UI、网关 dev dashboard）用 **pnpm + React + TypeScript + shadcn/ui**
+组织在 `web/` pnpm workspace 中；构建产物输出到各 crate 的 `web/dist`，
+由 Rust 侧 `include_dir!` **编译期嵌入**（release 二进制自包含，支持 SPA history 回退）。
+
+```bash
+# 1. 构建前端（输出到 crates/*/web/dist）
+cd web && pnpm install && pnpm run build && cd ..
+
+# 2. 构建后端（嵌入前端产物）
+cargo build --workspace
+# 或 release
+cargo build --release --workspace
+```
+
+> 未运行 `pnpm run build` 时，`cargo build` 也能通过（各 crate 的 `build.rs`
+> 在 `web/dist` 缺失时生成占位页），但网页会是"请先构建前端"的提示。
+
+前端开发模式（vite 热更新，代理 `/api` 到对应后端端口）：
+
+```bash
+cd web
+pnpm --filter sim-ui dev       # 模拟器 UI，端口 5180（代理 → 8082）
+pnpm --filter dashboard dev    # 网关 dashboard，端口 5181（代理 → 8080）
+```
+
+## 后端 Building
 
 ```bash
 # 全仓（两个二进制）

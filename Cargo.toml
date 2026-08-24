@@ -27,6 +27,8 @@ async-trait = "0.1"
 axum = { version = "0.8.9", features = ["ws", "tokio"] }
 futures-util = "0.3.34"
 meval = "0.2.0"
+# 前端静态资源编译期嵌入（web/dist，由 pnpm build 生成）
+include_dir = { version = "0.7", features = ["glob"] }
 
 [profile.release]
 lto = true

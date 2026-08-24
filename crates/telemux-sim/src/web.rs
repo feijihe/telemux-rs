@@ -1,6 +1,6 @@
 //! 网页 UI：观察模拟器所有寄存器（地址 / 类型 / 原始值）并设置控制变量。
 //!
-//! - `GET /`            — 单页仪表盘（Canvas 系统图 + 表格）
+//! - `GET /`            — React SPA（由 `web_assets` 嵌入 `web/dist` 服务）
 //! - `GET /api/state`   — JSON：控制变量 + 传感器 + 寄存器地图原始值
 //! - `GET /api/ws`      — WebSocket：按间隔推送状态 JSON（与 HTTP 同一份构建）
 //! - `POST /api/control`— 设置控制变量（JSON `{"name","value"}`），立即驱动模型
@@ -8,10 +8,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse};
+use axum::http::{Request, StatusCode};
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
@@ -32,15 +33,19 @@ struct WebState {
 pub fn router(slave: Arc<SimSlaveState>) -> Router {
     let state = WebState { slave };
     Router::new()
-        .route("/", get(index))
+        // React SPA：精确路径命中资源，其余回退 index.html（history 回退）。
+        .route("/", get(index_or_static))
+        .route("/assets/{*path}", get(index_or_static))
+        .route("/{*path}", get(index_or_static))
         .route("/api/state", get(state_json))
         .route("/api/ws", get(ws_handler))
         .route("/api/control", post(set_control))
         .with_state(state)
 }
 
-async fn index() -> impl IntoResponse {
-    Html(include_str!("index.html"))
+/// 前端 SPA 服务（嵌入 dist + history 回退）。
+async fn index_or_static(req: Request<Body>) -> impl IntoResponse {
+    crate::web_assets::index_or_static(req).await
 }
 
 /// `POST /api/control` 请求体。

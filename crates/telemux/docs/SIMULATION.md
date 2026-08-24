@@ -78,13 +78,17 @@ p_in = "cdu.sec.pump1.in_p"
 
 ## 4. 网页 UI
 
-`http://127.0.0.1:8082`：
-- **CDU 二维系统图（SVG）**：PHEX 板换居中，一次侧（冷水）与二次侧（热水）
+`http://127.0.0.1:8082`（**React + TypeScript + shadcn/ui**，`web/apps/sim-ui`，
+构建产物经 `include_dir!` 嵌入 `web_assets.rs` 服务）：
+- **CDU 二维系统图（Canvas）**：PHEX 板换居中，一次侧（冷水）与二次侧（热水）
   回路按管路布局，所有传感器标点显示实时值（温度/压力/流量等按类型配色）；
+  泵以并联环插在下管（只显示转速），H1 比例阀旁显示 duty；
 - **温度设定面板**：一次侧冷水 `primary_cold_temp`、二次侧热水 `secondary_hot_temp`
   （另有 pump1/2_duty、valve1_duty、fan_duty），输入后点"应用"立即生效，
   整个系统的温度因果链即时联动（已验证：设冷水 12→20°C，T1/T3 与二次侧 T7 同步变化）；
-- **寄存器地图原始值表**（区域/地址/槽位/原始 u16/解码 f32），每 1s 刷新。
+- **寄存器地图原始值表**（区域/地址/槽位/原始 u16/解码 f32），WebSocket 500ms 推送。
+
+开发模式：`pnpm --filter sim-ui dev`（vite，端口 5180，代理 `/api`→8082）。
 
 API：
 - `GET /api/state` — 全部状态 JSON；

@@ -1,3 +1,11 @@
 /target
 # 运行时滚动日志（阶段 6，配置 log_dir 生成）
 /logs
+
+# 前端（pnpm workspace）：node_modules 与构建产物。
+# web/pnpm-lock.yaml 应提交（锁定依赖版本）；web/dist 由 `pnpm run build`
+# 生成，供 include_dir! 编译期嵌入；未构建时由各 crate 的 build.rs
+# 生成占位页，故 dist 不入库。
+**/node_modules/
+crates/telemux/web/dist
+crates/telemux-sim/web/dist

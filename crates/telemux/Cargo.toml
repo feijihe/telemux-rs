@@ -23,6 +23,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 futures-util = { workspace = true }
 meval = { workspace = true }
+include_dir = { workspace = true }
 
 # Windows Service（阶段 6.3）：仅 Windows 平台编译
 [target.'cfg(windows)'.dependencies]

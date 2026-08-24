@@ -6,6 +6,7 @@ Rust **cargo workspace** (monorepo), edition 2024, single `Cargo.lock` (keep dep
 
 - `crates/telemux` — gateway: Modbus acquisition → processing pipeline → Redfish/Modbus out. The production binary.
 - `crates/telemux-sim` — CDU simulator: physical model + Modbus-TCP slave + web UI. Dev/test only, fully decoupled from the gateway (gateway only talks Modbus `transport="tcp"`).
+- `web/` — **pnpm workspace** (React + TS + shadcn/ui): `apps/sim-ui` (simulator UI), `apps/dashboard` (gateway dev dashboard), `packages/ui` (shared components/types). Build output lands in each crate's `web/dist`, embedded at compile time via `include_dir!` (`crates/*/src/**/web_assets.rs`); `build.rs` generates a placeholder if dist is missing.
 - Docs live in `crates/telemux/docs/` (e.g. `IMPLEMENTATION.md`, `SIMULATION.md`). README says `docs/...` but there is **no root `docs/`** — look under `crates/telemux/docs/`.
 
 ## Commands (run from repo root)
@@ -17,6 +18,12 @@ cargo test -p telemux             # one crate
 cargo test -p telemux --test cdu_sim   # single integration test (gateway↔sim E2E)
 cargo clippy --workspace --all-targets
 cargo fmt --all
+
+# 前端（必须先构建一次，产物供 include_dir! 嵌入）
+cd web && pnpm install && pnpm run build && cd ..
+# 开发模式（vite 热更新，代理 /api 到对应后端）
+pnpm --filter sim-ui dev          # 5180 → 8082
+pnpm --filter dashboard dev       # 5181 → 8080
 ```
 
 `--config` paths are relative to repo root; there is no root-default config, so pass the full path:

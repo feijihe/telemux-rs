@@ -1,7 +1,7 @@
 //! 开发仪表盘 HTTP + WebSocket 服务器（axum）。
 //!
 //! 路由：
-//! - `GET /`             — 单页仪表盘（内嵌 HTML）
+//! - `GET /`             — React SPA（`web_assets` 嵌入 `web/dist` 服务）
 //! - `GET /api/snapshot` — JSON 快照（轮询回退）
 //! - `GET /api/ws`       — WebSocket，每隔 `interval` 推送一次 JSON 快照
 //! - `POST /api/registers` — 热添加寄存器（开发构建；校验后
@@ -13,9 +13,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::response::{Html, IntoResponse};
+use axum::http::Request;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::{SinkExt, StreamExt};
@@ -96,7 +98,10 @@ async fn run(
     };
 
     let app = Router::new()
-        .route("/", get(index))
+        // React SPA：精确路径命中资源，其余回退 index.html（history 回退）。
+        .route("/", get(index_or_static))
+        .route("/assets/{*path}", get(index_or_static))
+        .route("/{*path}", get(index_or_static))
         .route("/api/snapshot", get(snapshot_json))
         .route("/api/ws", get(ws_handler))
         .route("/api/registers", post(create_register))
@@ -146,8 +151,9 @@ async fn broadcast_loop(
     }
 }
 
-async fn index() -> impl IntoResponse {
-    Html(include_str!("index.html"))
+/// 前端 SPA 服务（嵌入 dist + history 回退）。
+async fn index_or_static(req: Request<Body>) -> impl IntoResponse {
+    crate::dashboard::web_assets::index_or_static(req).await
 }
 
 async fn snapshot_json(State(state): State<DashboardState>) -> impl IntoResponse {

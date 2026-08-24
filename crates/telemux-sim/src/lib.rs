@@ -9,3 +9,4 @@ pub mod model;
 pub mod registers;
 pub mod server;
 pub mod web;
+pub mod web_assets;
