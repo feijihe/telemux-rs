@@ -17,3 +17,4 @@ export { Separator } from "./components/ui/separator";
 export { Switch } from "./components/ui/switch";
 export { Skeleton } from "./components/ui/skeleton";
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "./components/ui/tooltip";
+export { useTheme, type Theme } from "./hooks/use-theme"
