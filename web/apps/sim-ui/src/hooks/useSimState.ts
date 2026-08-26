@@ -15,6 +15,7 @@ export function useSimState(): [SimState | null, ConnState] {
 
   useEffect(() => {
     let alive = true;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
 
     // 首次 HTTP 拉取（立即渲染）
     fetch("/api/state")
@@ -25,6 +26,7 @@ export function useSimState(): [SimState | null, ConnState] {
       .catch(() => {});
 
     const connect = () => {
+      if (!alive) return;
       const proto = location.protocol === "https:" ? "wss://" : "ws://";
       const ws = new WebSocket(`${proto}${location.host}/api/ws`);
       wsRef.current = ws;
@@ -32,9 +34,10 @@ export function useSimState(): [SimState | null, ConnState] {
         if (alive) setConn("connected");
       };
       ws.onmessage = (ev) => {
+        if (!alive) return;
         try {
           const d = JSON.parse(ev.data as string) as SimState;
-          if (alive) setState(d);
+          setState(d);
         } catch {
           /* 忽略坏消息 */
         }
@@ -42,15 +45,21 @@ export function useSimState(): [SimState | null, ConnState] {
       ws.onclose = () => {
         if (!alive) return;
         setConn("disconnected");
-        setTimeout(connect, 1500); // 自动重连
+        connectTimer = setTimeout(connect, 1500); // 自动重连
       };
       ws.onerror = () => ws.close();
     };
-    connect();
+
+    // 延迟一个宏任务再建立连接：StrictMode 开发模式会双执行 effect
+    // （挂载→卸载→再挂载），首次挂载的 cleanup 借此在连接创建前取消，
+    // 避免浏览器报 "WebSocket is closed before the connection is established"。
+    connectTimer = setTimeout(connect, 0);
 
     return () => {
       alive = false;
+      clearTimeout(connectTimer);
       wsRef.current?.close();
+      wsRef.current = null;
     };
   }, []);
 

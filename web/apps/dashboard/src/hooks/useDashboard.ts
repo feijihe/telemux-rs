@@ -28,10 +28,12 @@ export function useDashboard(): [DashboardSnapshot | null, number, ConnState, ()
 
   useEffect(() => {
     let alive = true;
+    let connectTimer: ReturnType<typeof setTimeout> | undefined;
 
     void loadFull();
 
     const connect = () => {
+      if (!alive) return;
       const proto = location.protocol === "https:" ? "wss://" : "ws://";
       const ws = new WebSocket(`${proto}${location.host}/api/ws`);
       wsRef.current = ws;
@@ -50,15 +52,21 @@ export function useDashboard(): [DashboardSnapshot | null, number, ConnState, ()
       ws.onclose = () => {
         if (!alive) return;
         setConn("disconnected");
-        setTimeout(connect, 500); // 指数退避由外层定时器控制，这里固定 500ms 起步
+        connectTimer = setTimeout(connect, 500); // 指数退避由外层定时器控制，这里固定 500ms 起步
       };
       ws.onerror = () => ws.close();
     };
-    connect();
+
+    // 延迟一个宏任务再建立连接：StrictMode 开发模式会双执行 effect
+    // （挂载→卸载→再挂载），首次挂载的 cleanup 借此在连接创建前取消，
+    // 避免浏览器报 "WebSocket is closed before the connection is established"。
+    connectTimer = setTimeout(connect, 0);
 
     return () => {
       alive = false;
+      clearTimeout(connectTimer);
       wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [loadFull]);
 

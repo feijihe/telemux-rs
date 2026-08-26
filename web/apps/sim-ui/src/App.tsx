@@ -1,5 +1,5 @@
 import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Separator } from "@telemux/ui";
-import { Activity, Database, Gauge, Server, Sun, Moon } from "lucide-react";
+import { Activity, Database, Gauge, Server } from "lucide-react";
 import { ControlPanel } from "./components/ControlPanel";
 import { RegisterTable } from "./components/RegisterTable";
 import { SystemDiagram } from "./components/SystemDiagram";
