@@ -25,9 +25,35 @@ export function RegisterTable({ state }: { state: SimState }) {
                 </Badge>
               </TableCell>
               <TableCell className="font-mono text-muted-foreground">{hex(h.addr)}</TableCell>
-              <TableCell>{h.slot ? h.slot.control : <span className="text-muted-foreground">空</span>}</TableCell>
+              <TableCell>
+                {h.slot ? (
+                  h.slot.type === "control" ? (
+                    h.slot.control
+                  ) : (
+                    <span className="text-primary">{h.slot.sensor}</span>
+                  )
+                ) : (
+                  <span className="text-muted-foreground">空</span>
+                )}
+              </TableCell>
               <TableCell className="font-mono tabular-nums">{h.raw}</TableCell>
-              <TableCell>{h.slot ? (h.slot.writable ? "可写 u16" : "只读 u16") : "—"}</TableCell>
+              <TableCell>
+                {h.slot ? (
+                  h.slot.type === "control" ? (
+                    h.slot.writable ? (
+                      "可写 u16"
+                    ) : (
+                      "只读 u16"
+                    )
+                  ) : h.slot.storage === "u16" ? (
+                    "只读 u16 原始值"
+                  ) : (
+                    "只读 f32"
+                  )
+                ) : (
+                  "—"
+                )}
+              </TableCell>
             </TableRow>
           ))}
           {state.inputs.map((inp) => (

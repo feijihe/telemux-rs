@@ -95,7 +95,11 @@ fn write_control(
         .get(addr as usize)
         .and_then(|s| s.as_ref())
         .ok_or(ExceptionCode::IllegalDataAddress)?;
-    if !slot.writable {
+    // 保持区的传感器槽位只读（对齐真实 CDU 中 read_holding_registers 的测量点）。
+    let crate::registers::HoldingSlot::Control { control, writable } = slot else {
+        return Err(ExceptionCode::IllegalFunction);
+    };
+    if !writable {
         return Err(ExceptionCode::IllegalFunction);
     }
     // 控制变量值域 0-100（duty %）。
@@ -104,9 +108,9 @@ fn write_control(
         .engine
         .lock()
         .map_err(|_| ExceptionCode::ServerDeviceFailure)?
-        .set_control(&slot.control, value)
+        .set_control(control, value)
         .map_err(|e| {
-            warn!("sim: write control `{}`: {e}", slot.control);
+            warn!("sim: write control `{}`: {e}", control);
             ExceptionCode::IllegalDataValue
         })
 }

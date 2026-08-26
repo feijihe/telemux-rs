@@ -47,9 +47,13 @@ curl localhost:8000/redfish/v1/Chassis/cdu-01/Sensors
 
 `config/cdu2.toml` 由外部 CDU 寄存器映射 `cdu2.yaml` 改造而来，演示两类扩展能力：
 
-- **显式地址**：`SimControl.address`（保持寄存器）与 `SimSensor.address`（输入寄存器）
-  指定寄存器地址（0x0000 起，稀疏填充）。缺省仍按顺序紧凑分配（兼容原 cdu.toml）。
-- **u16 单字存储**：`SimSensor.storage = "u16"` 使传感器占 1 个输入寄存器（默认
+- **显式地址**：`SimControl.address`（保持寄存器）与 `SimSensor.address`（输入或
+  保持寄存器）指定寄存器地址（0x0000 起，稀疏填充）。缺省仍按顺序紧凑分配
+  （兼容原 cdu.toml）。
+- **寄存器区**：`SimSensor.area = "input"`（默认，输入寄存器 0x04）或
+  `"holding"`（保持寄存器 0x03 的**只读槽位**，对齐真实 CDU 中
+  `read_holding_registers` 的测量点——Modbus 工具用功能码 03 即可读取）。
+- **u16 单字存储**：`SimSensor.storage = "u16"` 使传感器占 1 个寄存器（默认
   `"f32"` 占 2 字 Big 字序）。`encode` 给出物理值 → 原始整数的编码表达式（变量
   `v`），使模拟器暴露的原始寄存器与真实 CDU 一致——网关按 cdu2.yaml 的解码公式
   （如 T = raw/10）即可还原物理值。
@@ -73,7 +77,8 @@ name = "Primary Inlet T1 (cold)"
 kind = "temperature"
 unit = "°C"
 formula = "12 + 0.5 * sin(t)"   # 物理值（稳态模型）
-address = 3328          # 显式输入寄存器地址（cdu2.yaml Temperatures.T1）
+address = 3328          # 显式寄存器地址（cdu2.yaml Temperatures.T1）
+area = "holding"        # 保持寄存器区（功能码 03 可读，对齐 read_holding_registers）
 storage = "u16"         # 单字原始寄存器
 encode = "v * 10"       # 物理值 → 原始整数（逆解码公式：raw = 物理 × 10）
 ```
@@ -86,8 +91,8 @@ encode = "v * 10"       # 物理值 → 原始整数（逆解码公式：raw = �
 
 | 区域 | 地址 | 内容 | 方向 |
 |---|---|---|---|
-| 保持寄存器 | 0x0000 起 | 控制变量（u16，0-100） | **读写**（网关写 → 驱动模型） |
-| 输入寄存器 | 0x0000 起 | 传感器（f32 双字 Big 字序，或 u16 单字原始值） | 只读 |
+| 保持寄存器 | 0x0000 起 | 控制变量（u16，0-100）+ `area="holding"` 的只读传感器 | **读**；控制变量可写 |
+| 输入寄存器 | 0x0000 起 | 传感器（默认 `area="input"`；f32 双字 Big 字序，或 u16 单字原始值） | 只读 |
 
 地址按配置顺序确定性 append；配置 `address` 字段后可显式指定（稀疏填充）。
 网关侧 `crates/telemux/config/cdu-gateway.toml` 把 `[[devices.registers]]`

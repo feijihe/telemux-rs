@@ -1,8 +1,9 @@
 //! Modbus 寄存器地图：把仿真模型映射为从站暴露的地址空间。
 //!
 //! 契约（`docs/SIMULATION.md`）：
-//! - 保持寄存器 `0x0000` 起：可写控制变量（u16，0-100），Modbus 写 → 驱动模型；
-//! - 输入寄存器 `0x0000` 起：传感器测量值，只读。
+//! - 保持寄存器 `0x0000` 起：可写控制变量（u16，0-100）+ 配置为 `area="holding"`
+//!   的只读传感器槽位（对齐真实 CDU 中 `read_holding_registers` 的测量点）；
+//! - 输入寄存器 `0x0000` 起：传感器测量值（默认 `area="input"`），只读。
 //!
 //! 地址分配：默认**确定性 append**（按配置顺序，与网关侧 Modbus Server 的
 //! 分配风格一致）；配置了显式 `address` 的项按指定地址放置（稀疏填充）。
@@ -13,15 +14,20 @@
 
 use std::collections::HashMap;
 
-use crate::model::{SimConfig, SimEngine, Storage};
+use crate::model::{Area, SimConfig, SimEngine, Storage};
 
-/// 保持寄存器槽位：控制变量名。
+/// 保持寄存器槽位：控制变量或只读传感器。
 #[derive(Debug, Clone)]
-pub struct HoldingSlot {
-    /// 控制变量名。
-    pub control: String,
-    /// 是否为可写控制变量。
-    pub writable: bool,
+pub enum HoldingSlot {
+    /// 可写控制变量。
+    Control {
+        /// 控制变量名。
+        control: String,
+        /// 是否可写。
+        writable: bool,
+    },
+    /// 只读传感器（对齐真实 CDU 保持区的测量点）。
+    Sensor(InputSlot),
 }
 
 /// 输入寄存器槽位：传感器。
@@ -38,7 +44,7 @@ pub struct InputSlot {
 /// 寄存器地图：地址 = Vec 下标（显式地址时稀疏填充 None）。
 #[derive(Debug, Clone, Default)]
 pub struct RegisterMap {
-    /// 保持区（控制变量，u16）。
+    /// 保持区（控制变量 + holding 传感器）。
     pub holding: Vec<Option<HoldingSlot>>,
     /// 输入区（传感器）。
     pub inputs: Vec<Option<InputSlot>>,
@@ -46,7 +52,7 @@ pub struct RegisterMap {
 
 impl RegisterMap {
     /// 从配置构建地图。控制变量按显式地址或配置顺序进保持区；
-    /// 传感器按显式地址或配置顺序进输入区（f32 占 2 字，u16 占 1 字）。
+    /// 传感器按 `area` 进保持区（只读）或输入区，支持显式地址（f32 占 2 字，u16 占 1 字）。
     pub fn build(sim: &SimConfig) -> Self {
         let mut map = RegisterMap::default();
         // 保持区：先放显式地址（按配置顺序，稀疏填充），再紧凑追加无地址项。
@@ -56,15 +62,43 @@ impl RegisterMap {
             while map.holding.len() <= addr {
                 map.holding.push(None);
             }
-            map.holding[addr] = Some(HoldingSlot {
+            map.holding[addr] = Some(HoldingSlot::Control {
                 control: c.name.clone(),
                 writable: c.writable,
             });
             next_holding = addr + 1;
         }
-        // 输入区：显式地址 + 紧凑追加。
+        // 传感器：按 area 分到保持区或输入区。
         let mut next_input = 0usize;
         for s in sim.iter_sensors() {
+            let width = match s.storage {
+                Storage::F32 => 2usize,
+                Storage::U16 => 1usize,
+            };
+            let (vec, next): (&mut Vec<Option<HoldingSlot>>, &mut usize) = match s.area {
+                Area::Holding => (&mut map.holding, &mut next_holding),
+                Area::Input => continue, // 输入区在下方单独处理
+            };
+            let addr = s.address.map(|a| a as usize).unwrap_or(*next);
+            let end = addr + width;
+            while vec.len() < end {
+                vec.push(None);
+            }
+            let slot = InputSlot {
+                sensor_id: s.sensor_id.clone(),
+                storage: s.storage,
+                encode: s.encode.clone(),
+            };
+            vec[addr] = Some(HoldingSlot::Sensor(slot.clone()));
+            if width == 2 {
+                vec[addr + 1] = Some(HoldingSlot::Sensor(slot));
+            }
+            *next = addr + width;
+        }
+        for s in sim.iter_sensors() {
+            if s.area != Area::Input {
+                continue;
+            }
             let width = match s.storage {
                 Storage::F32 => 2usize,
                 Storage::U16 => 1usize,
@@ -74,58 +108,60 @@ impl RegisterMap {
             while map.inputs.len() < end {
                 map.inputs.push(None);
             }
-            map.inputs[addr] = Some(InputSlot {
+            let slot = InputSlot {
                 sensor_id: s.sensor_id.clone(),
                 storage: s.storage,
                 encode: s.encode.clone(),
-            });
+            };
+            map.inputs[addr] = Some(slot.clone());
             if width == 2 {
-                map.inputs[addr + 1] = Some(InputSlot {
-                    sensor_id: s.sensor_id.clone(),
-                    storage: s.storage,
-                    encode: s.encode.clone(),
-                });
+                map.inputs[addr + 1] = Some(slot);
             }
             next_input = addr + width;
         }
         map
     }
 
-    /// 读取保持寄存器（控制变量当前值，取整为 u16）。
+    /// 读取保持寄存器：控制变量取整 u16；holding 传感器按 storage 编码。
     pub fn read_holding(&self, engine: &SimEngine, addr: usize) -> u16 {
         match self.holding.get(addr).and_then(|s| s.as_ref()) {
-            Some(slot) => {
-                let v = engine.control(&slot.control).unwrap_or(0.0);
+            Some(HoldingSlot::Control { control, .. }) => {
+                let v = engine.control(control).unwrap_or(0.0);
                 // duty 0-100：u16 直存；超出范围截断。
                 v.round().clamp(0.0, u16::MAX as f64) as u16
             }
+            Some(HoldingSlot::Sensor(slot)) => read_sensor(engine, slot, addr),
             None => 0,
         }
     }
 
-    /// 读取输入寄存器。f32 双字：按物理值位拆高/低字；u16 单字：编码原始整数。
+    /// 读取输入寄存器：按 storage 编码。
     pub fn read_input(&self, engine: &SimEngine, addr: usize) -> u16 {
-        let slot = match self.inputs.get(addr).and_then(|s| s.as_ref()) {
-            Some(s) => s,
-            None => return 0,
-        };
-        match slot.storage {
-            Storage::F32 => {
-                let values: HashMap<String, f64> = engine.eval_all().into_iter().collect();
-                let v = values.get(&slot.sensor_id).copied().unwrap_or(f64::NAN);
-                let bits = (v as f32).to_bits();
-                if addr.is_multiple_of(2) {
-                    (bits >> 16) as u16 // 高字
-                } else {
-                    (bits & 0xFFFF) as u16 // 低字
-                }
+        match self.inputs.get(addr).and_then(|s| s.as_ref()) {
+            Some(slot) => read_sensor(engine, slot, addr),
+            None => 0,
+        }
+    }
+}
+
+/// 读取传感器槽位。f32 双字：按物理值位拆高/低字；u16 单字：编码原始整数。
+fn read_sensor(engine: &SimEngine, slot: &InputSlot, addr: usize) -> u16 {
+    match slot.storage {
+        Storage::F32 => {
+            let values: HashMap<String, f64> = engine.eval_all().into_iter().collect();
+            let v = values.get(&slot.sensor_id).copied().unwrap_or(f64::NAN);
+            let bits = (v as f32).to_bits();
+            if addr.is_multiple_of(2) {
+                (bits >> 16) as u16 // 高字
+            } else {
+                (bits & 0xFFFF) as u16 // 低字
             }
-            Storage::U16 => {
-                let values: HashMap<String, f64> = engine.eval_all().into_iter().collect();
-                let v = values.get(&slot.sensor_id).copied().unwrap_or(f64::NAN);
-                let raw = encode_raw(&slot.encode, v);
-                (raw.round().clamp(0.0, u16::MAX as f64)) as u16
-            }
+        }
+        Storage::U16 => {
+            let values: HashMap<String, f64> = engine.eval_all().into_iter().collect();
+            let v = values.get(&slot.sensor_id).copied().unwrap_or(f64::NAN);
+            let raw = encode_raw(&slot.encode, v);
+            (raw.round().clamp(0.0, u16::MAX as f64)) as u16
         }
     }
 }
@@ -165,6 +201,7 @@ mod tests {
                 formula: "300 + pump1_duty * 1.2".into(), // 360
                 inputs: Default::default(),
                 address: None,
+                area: Area::Input,
                 storage: Storage::F32,
                 encode: None,
             }],
@@ -177,7 +214,10 @@ mod tests {
     fn map_lays_out_addresses() {
         let map = RegisterMap::build(&sim_config());
         assert_eq!(map.holding.len(), 1);
-        assert_eq!(map.holding[0].as_ref().unwrap().control, "pump1_duty");
+        assert!(matches!(
+            &map.holding[0],
+            Some(HoldingSlot::Control { control, .. }) if control == "pump1_duty"
+        ));
         // f32 占 2 字
         assert_eq!(map.inputs.len(), 2);
     }
@@ -207,6 +247,7 @@ mod tests {
                 formula: "25.5".into(),
                 inputs: Default::default(),
                 address: Some(3328),
+                area: Area::Input,
                 storage: Storage::U16,
                 encode: Some("v * 10".into()),
             }],
@@ -235,6 +276,7 @@ mod tests {
                     formula: "20".into(),
                     inputs: Default::default(),
                     address: Some(3328),
+                    area: Area::Input,
                     storage: Storage::U16,
                     encode: Some("v * 10".into()),
                 },
@@ -246,6 +288,7 @@ mod tests {
                     formula: "22".into(),
                     inputs: Default::default(),
                     address: Some(3329),
+                    area: Area::Input,
                     storage: Storage::U16,
                     encode: Some("v * 10".into()),
                 },
@@ -274,6 +317,7 @@ mod tests {
                     formula: "1".into(),
                     inputs: Default::default(),
                     address: Some(100),
+                    area: Area::Input,
                     storage: Storage::F32, // 占 100-101
                     encode: None,
                 },
@@ -285,10 +329,76 @@ mod tests {
                     formula: "1".into(),
                     inputs: Default::default(),
                     address: Some(101),
+                    area: Area::Input,
                     storage: Storage::U16,
                     encode: None,
                 },
             ],
+            pri: None,
+            sec: None,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    /// holding 区传感器：cdu2 的真实 CDU 传感器用 read_holding_registers。
+    /// T1@3328（area=holding）应能通过保持寄存器（功能码 03）读到。
+    #[test]
+    fn holding_area_sensor_readable() {
+        let cfg = SimConfig {
+            controls: vec![SimControl {
+                name: "pump1_duty".into(),
+                initial: 50.0,
+                unit: Some("%".into()),
+                writable: true,
+                address: Some(2192),
+            }],
+            sensors: vec![SimSensor {
+                sensor_id: "cdu.pri.in.t1".into(),
+                name: "T1".into(),
+                kind: "temperature".into(),
+                unit: Some("°C".into()),
+                formula: "25.5".into(),
+                inputs: Default::default(),
+                address: Some(3328),
+                area: Area::Holding,
+                storage: Storage::U16,
+                encode: Some("v * 10".into()),
+            }],
+            pri: None,
+            sec: None,
+        };
+        cfg.validate().expect("validate ok");
+        let map = RegisterMap::build(&cfg);
+        let engine = SimEngine::new(cfg);
+        // 保持寄存器 03 读到传感器值（原来读到 0 的 bug 修复）。
+        assert_eq!(map.read_holding(&engine, 3328), 255);
+        // 控制变量仍可读。
+        assert_eq!(map.read_holding(&engine, 2192), 50);
+    }
+
+    /// holding 区控制与传感器地址冲突被拒绝。
+    #[test]
+    fn holding_area_conflict_rejected() {
+        let cfg = SimConfig {
+            controls: vec![SimControl {
+                name: "pump1_duty".into(),
+                initial: 50.0,
+                unit: Some("%".into()),
+                writable: true,
+                address: Some(3328),
+            }],
+            sensors: vec![SimSensor {
+                sensor_id: "cdu.pri.in.t1".into(),
+                name: "T1".into(),
+                kind: "temperature".into(),
+                unit: Some("°C".into()),
+                formula: "25.5".into(),
+                inputs: Default::default(),
+                address: Some(3328),
+                area: Area::Holding,
+                storage: Storage::U16,
+                encode: None,
+            }],
             pri: None,
             sec: None,
         };

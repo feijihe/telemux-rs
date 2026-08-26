@@ -64,11 +64,23 @@ pub struct SimControl {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Storage {
-    /// f32 双字（Big 字序，占 2 个输入寄存器），默认。
+    /// f32 双字（Big 字序，占 2 个寄存器），默认。
     #[default]
     F32,
-    /// u16 单字（占 1 个输入寄存器），物理值经 `encode` 编码为原始整数。
+    /// u16 单字（占 1 个寄存器），物理值经 `encode` 编码为原始整数。
     U16,
+}
+
+/// 传感器暴露的寄存器区。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Area {
+    /// 输入寄存器区（功能码 0x04），默认。
+    #[default]
+    Input,
+    /// 保持寄存器区（功能码 0x03，只读槽位）——对齐真实 CDU 中
+    /// `read_holding_registers` 的传感器。
+    Holding,
 }
 
 /// 仿真传感器：由稳态表达式求值，作为测量值产出。
@@ -97,9 +109,12 @@ pub struct SimSensor {
     /// 变量名 → 引用的传感器/控制变量（可选，显式依赖映射）。
     #[serde(default)]
     pub inputs: std::collections::HashMap<String, String>,
-    /// 显式输入寄存器起始地址（0x0000 起；缺省按配置顺序紧凑分配）。
+    /// 显式寄存器起始地址（0x0000 起；缺省按配置顺序紧凑分配）。
     #[serde(default)]
     pub address: Option<u16>,
+    /// 传感器暴露的寄存器区（input 输入区 | holding 保持区只读）。
+    #[serde(default)]
+    pub area: Area,
     /// 寄存器存储格式（f32 双字 | u16 单字）。
     #[serde(default)]
     pub storage: Storage,
@@ -147,17 +162,20 @@ impl SimConfig {
     /// 显式寄存器地址不冲突。
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut controls: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        let mut holding_addrs: Vec<(u16, u16)> = Vec::new(); // (start, end)
+        let mut holding_spans: Vec<(u16, u16)> = Vec::new(); // (start, end)，含控制与 holding 传感器
         for c in &self.controls {
             if !controls.insert(c.name.as_str()) {
                 anyhow::bail!("duplicate sim control `{}`", c.name);
             }
             if let Some(a) = c.address {
                 let span = (a, a);
-                if holding_addrs.iter().any(|(s, e)| span_overlap(&span, s, e)) {
-                    anyhow::bail!("sim control `{}`: holding address {a} overlaps another control", c.name);
+                if holding_spans.iter().any(|(s, e)| span_overlap(&span, s, e)) {
+                    anyhow::bail!(
+                        "sim control `{}`: holding address {a} overlaps another holding item",
+                        c.name
+                    );
                 }
-                holding_addrs.push(span);
+                holding_spans.push(span);
             }
         }
         let mut ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -167,24 +185,29 @@ impl SimConfig {
                 anyhow::bail!("duplicate sim sensor_id `{}`", s.sensor_id);
             }
         }
-        // 显式输入地址冲突检测（f32 占 2 字，u16 占 1 字）。
+        // 显式地址冲突检测：保持区（控制 + holding 传感器）与输入区各自独立编址，
+        // 区内不允许重叠（f32 占 2 字，u16 占 1 字）。
         let mut input_spans: Vec<(u16, u16)> = Vec::new();
         for s in self.iter_sensors() {
-            if let Some(a) = s.address {
-                let w = match s.storage {
-                    Storage::F32 => 2u16,
-                    Storage::U16 => 1u16,
-                };
-                let span = (a, a.saturating_add(w).saturating_sub(1));
-                if input_spans.iter().any(|(s0, e0)| span_overlap(&span, s0, e0)) {
-                    anyhow::bail!(
-                        "sim sensor `{}`: input address {a}..{} overlaps another sensor",
-                        s.sensor_id,
-                        span.1
-                    );
-                }
-                input_spans.push(span);
+            let Some(a) = s.address else { continue };
+            let w = match s.storage {
+                Storage::F32 => 2u16,
+                Storage::U16 => 1u16,
+            };
+            let span = (a, a.saturating_add(w).saturating_sub(1));
+            let spans = match s.area {
+                Area::Holding => &mut holding_spans,
+                Area::Input => &mut input_spans,
+            };
+            if spans.iter().any(|(s0, e0)| span_overlap(&span, s0, e0)) {
+                anyhow::bail!(
+                    "sim sensor `{}`: {:?} address {a}..{} overlaps another item",
+                    s.sensor_id,
+                    s.area,
+                    span.1
+                );
             }
+            spans.push(span);
         }
         // 第二遍：校验 name/formula/inputs 目标/encode。
         for s in self.iter_sensors() {
@@ -465,6 +488,7 @@ mod tests {
                     formula: "pump1_duty * 2".into(),
                     inputs: Default::default(),
                     address: None,
+                    area: Area::Input,
                     storage: Storage::F32,
                     encode: None,
                 },
@@ -476,6 +500,7 @@ mod tests {
                     formula: "valve1_duty * 1.5".into(),
                     inputs: Default::default(),
                     address: None,
+                    area: Area::Input,
                     storage: Storage::F32,
                     encode: None,
                 },
@@ -487,6 +512,7 @@ mod tests {
                     formula: "45 - f1_flow * 0.1".into(),
                     inputs: [("f1_flow".to_string(), "cdu.f1_flow".to_string())].into(),
                     address: None,
+                    area: Area::Input,
                     storage: Storage::F32,
                     encode: None,
                 },

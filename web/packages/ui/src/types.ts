@@ -20,13 +20,19 @@ export interface SimSensor {
   value: number | null;
 }
 
-/** 寄存器地图保持区槽位 */
+/** 保持寄存器槽位：控制变量或只读传感器 */
 export interface HoldingSlot {
-  control: string;
-  writable: boolean;
+  type: "control" | "sensor";
+  /** type=control 时的控制变量名 */
+  control?: string;
+  /** type=control 时是否可写 */
+  writable?: boolean;
+  /** type=sensor 时的传感器 id */
+  sensor?: string;
+  /** type=sensor 时的存储格式 */
+  storage?: "f32" | "u16";
 }
 
-/** 寄存器地图保持区条目 */
 export interface HoldingEntry {
   addr: number;
   slot: HoldingSlot | null;
