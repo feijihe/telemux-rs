@@ -41,7 +41,22 @@ curl localhost:8000/redfish/v1/Chassis/cdu-01/Sensors
 - 水箱/环境/泄漏等全局传感器用 `[[sim.sensors]]` 平铺
 
 代码层（`SimConfig.iter_sensors()`）按 **一次侧 in/out/aux → 二次侧 in/out/aux → 未分组**
-顺序扁平化，因此 Modbus 输入寄存器地址按组连续划分。
+顺序扁平化。默认寄存器地址按组连续划分（保持区=控制、输入区=传感器，均从 0 起）。
+
+### 显式地址与 u16 原始寄存器（cdu2 适配）
+
+`config/cdu2.toml` 由外部 CDU 寄存器映射 `cdu2.yaml` 改造而来，演示两类扩展能力：
+
+- **显式地址**：`SimControl.address`（保持寄存器）与 `SimSensor.address`（输入寄存器）
+  指定寄存器地址（0x0000 起，稀疏填充）。缺省仍按顺序紧凑分配（兼容原 cdu.toml）。
+- **u16 单字存储**：`SimSensor.storage = "u16"` 使传感器占 1 个输入寄存器（默认
+  `"f32"` 占 2 字 Big 字序）。`encode` 给出物理值 → 原始整数的编码表达式（变量
+  `v`），使模拟器暴露的原始寄存器与真实 CDU 一致——网关按 cdu2.yaml 的解码公式
+  （如 T = raw/10）即可还原物理值。
+
+物理分组（cdu2.yaml → cdu2.toml）：F1/T1/P1 → `pri.in`，T2/P2 → `pri.out`，
+T3/P3 → `sec.out`，T4/P4 → `sec.in`；泵/阀/环境/派生量按语义归 aux 或全局。
+线圈设备（LE1/LI1/LI2）暂不模拟。
 
 ```toml
 [sim]
@@ -50,15 +65,17 @@ name = "pump1_duty"     # 公式引用名
 initial = 50
 unit = "%"
 writable = true         # true → 暴露为保持寄存器（u16 0-100），可写
+address = 2192          # 显式保持寄存器地址（对应 cdu2.yaml Pump1.DutyCycle）
 
 [[sim.pri.in]]
-sensor_id = "cdu.pri.p1"
-name = "Primary Inlet P1"
-kind = "pressure"
-unit = "kPa"
-formula = "p_in + pump1_duty^2 * 0.08"   # 离心泵扬程 ∝ duty²
-[sim.pri.in.inputs]
-p_in = "cdu.sec.pump1.in_p"
+sensor_id = "cdu.pri.in.t1"
+name = "Primary Inlet T1 (cold)"
+kind = "temperature"
+unit = "°C"
+formula = "12 + 0.5 * sin(t)"   # 物理值（稳态模型）
+address = 3328          # 显式输入寄存器地址（cdu2.yaml Temperatures.T1）
+storage = "u16"         # 单字原始寄存器
+encode = "v * 10"       # 物理值 → 原始整数（逆解码公式：raw = 物理 × 10）
 ```
 
 变量解析规则：`inputs` 映射 → 控制变量名 → 内置时间 `t` → 传感器短名。
@@ -70,11 +87,12 @@ p_in = "cdu.sec.pump1.in_p"
 | 区域 | 地址 | 内容 | 方向 |
 |---|---|---|---|
 | 保持寄存器 | 0x0000 起 | 控制变量（u16，0-100） | **读写**（网关写 → 驱动模型） |
-| 输入寄存器 | 0x0000 起 | 传感器（f32 双字，Big 字序） | 只读 |
+| 输入寄存器 | 0x0000 起 | 传感器（f32 双字 Big 字序，或 u16 单字原始值） | 只读 |
 
-地址按配置顺序确定性 append。网关侧 `crates/telemux/config/cdu-gateway.toml`
-把 `[[devices.registers]]` 映射到这些地址（`function="holding"` 的 duty 可写，
-`function="input"` 的传感器 f32 双字）。
+地址按配置顺序确定性 append；配置 `address` 字段后可显式指定（稀疏填充）。
+网关侧 `crates/telemux/config/cdu-gateway.toml` 把 `[[devices.registers]]`
+映射到这些地址（`function="holding"` 的 duty 可写，`function="input"` 的
+传感器 f32 双字或 u16 单字）。
 
 ## 4. 网页 UI
 

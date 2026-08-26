@@ -1,0 +1,309 @@
+---
+plugins:
+  - name: Valves
+    index: 200
+    type: valve
+    attributes:
+      - key: DutyCycle
+        read_method: read_holding_registers
+        write_method: write_registers
+        formula: ($DutyCycle - 2000) / 80
+        write_formula: $value * 80 + 2000
+        # batch_address: 20
+        unit: '%'
+        min: 0
+        max: 100
+      - key: Voltage
+        read_method: read_holding_registers
+        unit: V
+        formula: $Voltage / 1000
+        decimal_places: 1
+      - key: Opening
+        read_method: read_holding_registers
+        unit: '%'
+        # formula: ($Voltage - 2000) / (10000 - 2000) * 100
+        formula: ($Voltage - 2000) / 80
+    devices:
+      Valve1:
+        DutyCycle:
+          address: 3424
+        Voltage:
+          address: 3404
+  - name: 'Pumps'
+    index: 300
+    type: pump
+    attributes:
+      - key: DutyCycle
+        read_method: read_holding_registers
+        write_method: write_registers
+        batch_address: 30
+        unit: '%'
+        formula: $DutyCycle / 53
+        write_formula: $value * 53
+        min: 0
+        max: 100
+      - key: Speed
+        read_method: read_holding_registers
+        unit: RPM
+      - key: Current
+        read_method: read_holding_registers
+        unit: A
+        decimal_places: 1
+        formula: $Current / 1000
+      # - key: Fg
+      #   read_method: read_holding_registers
+      #   ignore: True
+      - key: Temperature
+        read_method: read_holding_registers
+        unit: °C
+        unit_type: temperature
+        decimal_places: 1
+      - key: Voltage
+        read_method: read_holding_registers
+        unit: V
+        formula: $Voltage / 10
+        decimal_places: 1
+    devices:
+      Pump1:
+        DutyCycle:
+          address: 2192
+        Speed:
+          address: 2080
+        Current:
+          address: 2081
+        # Fg:
+        #   address: 2048
+        Temperature:
+          address: 2113
+        Voltage:
+          address: 2112
+      Pump2:
+        DutyCycle:
+          address: 2193
+        Speed:
+          address: 2082
+        Current:
+          address: 2083
+        # Fg:
+        #   address: 2049
+        Temperature:
+          address: 2117
+        Voltage:
+          address: 2116
+  - name: Flows
+    is_sensor: true
+    index: 400
+    type: flow
+    attributes:
+      - key: value
+        read_method: read_holding_registers
+        # formula: ($value - 4000) / 1000 / 16 * 595
+        formula: ($value - 4000) / 1000 * 18.6875
+        unit: LPM
+        unit_type: flow
+        min: 0
+        decimal_places: 1
+    devices:
+      F1:
+        value:
+          address: 3397
+      F2:
+        value:
+          address: 3398
+  - name: Pressures
+    is_sensor: true
+    index: 500
+    type: pressure
+    attributes:
+      - key: value
+        read_method: read_holding_registers
+        # formula: ($value - 4000) / 1000 / 16 * 595
+        formula: ($value - 4000) / 16000 * 150
+        unit: PSI
+        unit_type: pressure
+        decimal_places: 1
+    devices:
+      P1:
+        value:
+          address: 3392
+      P2:
+        value:
+          address: 3393
+      P3:
+        value:
+          address: 3394
+      P4:
+        value:
+          address: 3395
+  - name: Temperatures
+    is_sensor: true
+    index: 600
+    type: temperature
+    attributes:
+      - key: value
+        read_method: read_holding_registers
+        unit: '℃'
+        unit_type: temperature
+        formula: $value / 10
+        decimal_places: 1
+    devices:
+      T1:
+        value:
+          address: 3328
+      T2:
+        value:
+          address: 3329
+      T3:
+        value:
+          address: 3330
+      T4:
+        value:
+          address: 3331
+  - name: PHs
+    index: 700
+    type: ph
+    attributes:
+      - key: value
+        read_method: read_holding_registers
+        formula: $value / 1000 * 0.875 - 3.5
+        unit: pH
+        min: 0
+        max: 14
+        decimal_places: 1
+    devices:
+      PH1:
+        value:
+          address: 3399
+  - name: PHTs
+    index: 800
+    type: pht
+    attributes:
+      - key: Temperature
+        read_method: read_holding_registers
+        formula: $Temperature / 100
+        unit: '℃'
+        unit_type: temperature
+        decimal_places: 1
+      - key: Humidity
+        read_method: read_holding_registers
+        formula: $Humidity / 100
+        unit: '%'
+        min: 0
+        max: 100
+        decimal_places: 1
+      - key: DewPoint
+        read_method: read_holding_registers
+        # formula: $Temperature / 100 - (10000 - $Humidity) / 500
+        formula: $DewPoint / 100
+        unit: '℃'
+        unit_type: temperature
+        max: 100
+        decimal_places: 1
+    devices:
+      PHT1:
+        Temperature:
+          address: 3344
+        Humidity:
+          address: 3345
+        DewPoint:
+          address: 3346
+  - name: Leakages
+    index: 810
+    type: leakage
+    attributes:
+      - key: value
+        read_method: read_coils
+        unit: ''
+      - key: break
+        read_method: read_coils
+    devices:
+      LE1:
+        value:
+          address: 24
+        break:
+          address: 25
+  - name: Liquids
+    index: 820
+    type: liquid_level
+    attributes:
+      - key: value
+        read_method: read_coils
+    devices:
+      LI1:
+        value:
+          address: 0
+      LI2:
+        value:
+          address: 1
+
+computed_devices:
+  - address: 1601
+    decimal_places: 1
+    expression: Temperatures.T4.value - Temperatures.T1.value
+    label: 'Approach Temperature'
+    name: T4-T1
+    type: temperature
+    unit: ℃
+    unit_type: temperature
+
+  - address: 1602
+    decimal_places: 1
+    expression: (Temperatures.T3.value - Temperatures.T4.value) * Flows.F2.value * $Cp * 0.6 / 10000
+    label: Cooling Capacity
+    min: 0
+    name: CAP
+    type: other
+    unit: kW
+
+  - address: 1603
+    decimal_places: 1
+    expression: Pressures.P4.value - Pressures.P3.value
+    label: Differential Pressure
+    name: P4-P3
+    type: pressure
+    unit: PSi
+    unit_type: pressure
+
+  - address: 1604
+    decimal_places: 1
+    expression: Flows.F1.value
+    label: Total Flow
+    name: F1
+    type: flow
+    unit: LPM
+    unit_type: flow
+
+  - address: 1606
+    decimal_places: 1
+    expression: Pressures.P1.value - Pressures.P2.value
+    label: P1 - P2
+    name: P1-P2
+    type: pressure
+    unit: PSI
+    unit_type: pressure
+
+  - address: 1607
+    decimal_places: 1
+    expression: Temperatures.T3.value - PHTs.PHT1.DewPoint
+    label: T3 - T露
+    name: T3-DewPoint
+    type: temperature
+    unit: ℃
+    unit_type: temperature
+
+  - address: 1608
+    decimal_places: 1
+    expression: Temperatures.T4.value - PHTs.PHT1.DewPoint
+    label: T4 - T露
+    name: T4-DewPoint
+    type: temperature
+    unit: ℃
+    unit_type: temperature
+
+  - address: 1609
+    decimal_places: 1
+    expression: PHTs.PHT1.DewPoint - PHTs.PHT1.Temperature
+    label: T露 - T环
+    name: DewPoint-Tenv
+    unit: ℃
+    unit_type: temperature

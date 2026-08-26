@@ -1,0 +1,405 @@
+# Telmux-Sim CDU 仿真配置（cdu2 适配版）
+#
+# 由外部 CDU 寄存器映射 `cdu2.yaml` 改造而来：传感器物理分组与真实设备一致，
+# 且每个传感器/控制变量的 `address` 对齐 cdu2.yaml 的寄存器地址，存储格式用
+# `storage = "u16"` + `encode`（物理值 → 原始整数），使模拟器暴露的原始寄存器
+# 与真实 CDU 同构——网关按 cdu2.yaml 的地址与解码公式即可读得物理值。
+#
+# 物理分组（用户指定）：
+#   F1, T1, P1 → pri.in（一次侧入口）
+#   T2, P2     → pri.out（一次侧出口）
+#   T3, P3     → sec.out（二次侧出口）
+#   T4, P4     → sec.in（二次侧入口）
+# 泵/阀/环境/派生量按 cdu2.yaml 语义归入 aux 或全局。线圈设备（LE1/LI1/LI2）
+# 暂不模拟（sim 不暴露线圈）。
+#
+# 用法：
+#   cargo run -p telemux-sim -- --config config/cdu2.toml \
+#       --modbus-port 1502 --web-port 8082
+
+[sim]
+
+# ===================== 控制变量（保持寄存器，可写） =====================
+# cdu2.yaml 中的 DutyCycle：Valve1@3424、Pump1@2192、Pump2@2193。
+
+[[sim.controls]]
+name = "pump1_duty"          # 二次侧泵 1 占空比 %
+initial = 50
+unit = "%"
+writable = true
+address = 2192               # Pump1.DutyCycle
+
+[[sim.controls]]
+name = "pump2_duty"          # 二次侧泵 2 占空比 %
+initial = 40
+unit = "%"
+writable = true
+address = 2193               # Pump2.DutyCycle
+
+[[sim.controls]]
+name = "valve1_duty"         # 一次侧 H1 比例阀开度 %
+initial = 30
+unit = "%"
+writable = true
+address = 3424               # Valve1.DutyCycle
+
+# ===================== 一次侧（冷水回路） =====================
+
+# ---- 一次侧入口：F1, T1, P1 ----
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.f1"
+name = "Primary Inlet Flow F1"
+kind = "flow"
+unit = "LPM"
+formula = "8 + valve1_duty * 0.9 + 0.6 * cos(t)"            # 比例阀开度↑ → 一次侧流量↑
+address = 3397               # Flows.F1
+storage = "u16"
+encode = "4000 + v * 53.512" # 逆 cdu2: value = (raw-4000)/1000*18.6875
+
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.t1"
+name = "Primary Inlet T1 (cold)"
+kind = "temperature"
+unit = "°C"
+formula = "12 + 0.5 * sin(t)"                               # 一次侧冷水供水温度
+address = 3328               # Temperatures.T1
+storage = "u16"
+encode = "v * 10"            # 逆 cdu2: value = raw/10
+
+[[sim.pri.in]]
+sensor_id = "cdu.pri.in.p1"
+name = "Primary Inlet P1"
+kind = "pressure"
+unit = "PSI"
+formula = "40 + valve1_duty * 0.15 + 0.2 * sin(t/2)"        # 阀开度越大，进口压力越高
+address = 3392               # Pressures.P1
+storage = "u16"
+encode = "4000 + v * 106.667" # 逆 cdu2: value = (raw-4000)/16000*150
+
+# ---- 一次侧出口：T2, P2 ----
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.t2"
+name = "Primary Outlet T2 (warmed)"
+kind = "temperature"
+unit = "°C"
+formula = "t1 + 2.5 + 0.2 * sin(t/3)"                       # 冷水经板换被二次侧加热升温
+address = 3329               # Temperatures.T2
+storage = "u16"
+encode = "v * 10"
+[sim.pri.out.inputs]
+t1 = "cdu.pri.in.t1"
+
+[[sim.pri.out]]
+sensor_id = "cdu.pri.out.p2"
+name = "Primary Outlet P2"
+kind = "pressure"
+unit = "PSI"
+formula = "p1 - 0.8 + 0.1 * cos(t/2)"                       # 阀后压损
+address = 3393               # Pressures.P2
+storage = "u16"
+encode = "4000 + v * 106.667"
+[sim.pri.out.inputs]
+p1 = "cdu.pri.in.p1"
+
+# ---- 一次侧辅助：阀电压 ----
+[[sim.pri.aux]]
+sensor_id = "cdu.pri.valve1.voltage"
+name = "Valve1 Voltage"
+kind = "voltage"
+unit = "V"
+formula = "valve1_duty * 0.1 + 1"                           # 0-100% → ~1-11V 供电
+address = 3404               # Valves.Valve1.Voltage
+storage = "u16"
+encode = "v * 1000"          # 逆 cdu2: value = raw/1000
+
+# ===================== 二次侧（热水回路） =====================
+
+# ---- 二次侧入口：T4, P4（服务器回水） ----
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.t4"
+name = "From Server T4 (hot return)"
+kind = "temperature"
+unit = "°C"
+formula = "45 + 0.5 * sin(t/3)"                             # 服务器热回水
+address = 3331               # Temperatures.T4
+storage = "u16"
+encode = "v * 10"
+
+[[sim.sec.in]]
+sensor_id = "cdu.sec.in.p4"
+name = "From Server P4"
+kind = "pressure"
+unit = "PSI"
+formula = "50 + (pump1_duty + pump2_duty) * 0.2 + 0.3 * cos(t/2)"  # 泵出口压力随出力
+address = 3395               # Pressures.P4
+storage = "u16"
+encode = "4000 + v * 106.667"
+
+# ---- 二次侧出口：T3, P3（服务器供水） ----
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.t3"
+name = "To Server T3 (cooled supply)"
+kind = "temperature"
+unit = "°C"
+formula = "t4 - f1 * 0.15 + 0.3 * sin(t/4)"                 # 一次侧冷水流量↑ → 二次侧供水降温
+address = 3330               # Temperatures.T3
+storage = "u16"
+encode = "v * 10"
+[sim.sec.out.inputs]
+t4 = "cdu.sec.in.t4"
+f1 = "cdu.pri.in.f1"
+
+[[sim.sec.out]]
+sensor_id = "cdu.sec.out.p3"
+name = "To Server P3"
+kind = "pressure"
+unit = "PSI"
+formula = "p4 - 1.2 + 0.2 * cos(t/3)"                       # 服务器侧压损
+address = 3394               # Pressures.P3
+storage = "u16"
+encode = "4000 + v * 106.667"
+[sim.sec.out.inputs]
+p4 = "cdu.sec.in.p4"
+
+# ---- 二次侧辅助：F2 流量 + 两泵 ----
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.f2"
+name = "Secondary Flow F2"
+kind = "flow"
+unit = "LPM"
+formula = "10 + (pump1_duty + pump2_duty) * 1.1 + 0.7 * sin(t)"  # 两泵并联总流量∝Σduty
+address = 3398               # Flows.F2
+storage = "u16"
+encode = "4000 + v * 53.512"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump1.speed"
+name = "Pump1 Speed"
+kind = "pump"
+unit = "RPM"
+formula = "pump1_duty * 60 + 3 * sin(t)"
+address = 2080               # Pumps.Pump1.Speed
+storage = "u16"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump1.current"
+name = "Pump1 Current"
+kind = "pump"
+unit = "A"
+formula = "pump1_duty * 0.65 + 0.03 * cos(t)"
+address = 2081               # Pumps.Pump1.Current
+storage = "u16"
+encode = "v * 1000"          # 逆 cdu2: value = raw/1000
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump1.temperature"
+name = "Pump1 Temperature"
+kind = "temperature"
+unit = "°C"
+formula = "t4 + 2 + 0.1 * sin(t/4)"                         # 泵温略高于回水
+address = 2113               # Pumps.Pump1.Temperature
+storage = "u16"
+[sim.sec.aux.inputs]
+t4 = "cdu.sec.in.t4"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump1.voltage"
+name = "Pump1 Voltage"
+kind = "voltage"
+unit = "V"
+formula = "380 + pump1_duty * 0.2 + 0.1 * sin(t/3)"
+address = 2112               # Pumps.Pump1.Voltage
+storage = "u16"
+encode = "v * 10"            # 逆 cdu2: value = raw/10
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump2.speed"
+name = "Pump2 Speed"
+kind = "pump"
+unit = "RPM"
+formula = "pump2_duty * 60 + 3 * cos(t/2)"
+address = 2082               # Pumps.Pump2.Speed
+storage = "u16"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump2.current"
+name = "Pump2 Current"
+kind = "pump"
+unit = "A"
+formula = "pump2_duty * 0.65 + 0.03 * sin(t)"
+address = 2083               # Pumps.Pump2.Current
+storage = "u16"
+encode = "v * 1000"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump2.temperature"
+name = "Pump2 Temperature"
+kind = "temperature"
+unit = "°C"
+formula = "t4 + 2 + 0.1 * cos(t/4)"
+address = 2117               # Pumps.Pump2.Temperature
+storage = "u16"
+[sim.sec.aux.inputs]
+t4 = "cdu.sec.in.t4"
+
+[[sim.sec.aux]]
+sensor_id = "cdu.sec.aux.pump2.voltage"
+name = "Pump2 Voltage"
+kind = "voltage"
+unit = "V"
+formula = "380 + pump2_duty * 0.2 + 0.1 * cos(t/3)"
+address = 2116               # Pumps.Pump2.Voltage
+storage = "u16"
+encode = "v * 10"
+
+# ===================== 全局未分组（水箱/环境） =====================
+
+# ---- 水箱 pH ----
+[[sim.sensors]]
+sensor_id = "cdu.tank.ph1"
+name = "Tank PH1"
+kind = "ph"
+unit = "pH"
+formula = "8.2 + 0.05 * sin(t/5)"                           # 冷却液 pH
+address = 3399               # PHs.PH1
+storage = "u16"
+encode = "4000 + (v + 3.5) * 1142.857"  # 逆 cdu2: value = raw/1000*0.875 - 3.5
+
+# ---- 环境温湿度露点（PHT1） ----
+[[sim.sensors]]
+sensor_id = "cdu.env.temp"
+name = "Ambient Temperature"
+kind = "temperature"
+unit = "°C"
+formula = "25 + 0.3 * cos(t/3)"
+address = 3344               # PHTs.PHT1.Temperature
+storage = "u16"
+encode = "v * 100"           # 逆 cdu2: value = raw/100
+
+[[sim.sensors]]
+sensor_id = "cdu.env.rh"
+name = "Ambient Humidity"
+kind = "humidity"
+unit = "%"
+formula = "45 + 0.5 * sin(t/4)"
+address = 3345               # PHTs.PHT1.Humidity
+storage = "u16"
+encode = "v * 100"
+
+[[sim.sensors]]
+sensor_id = "cdu.env.dewpoint"
+name = "Dew Point"
+kind = "temperature"
+unit = "°C"
+formula = "cdu_env_temp - (100 - cdu_env_rh) / 5"           # 近似露点
+address = 3346               # PHTs.PHT1.DewPoint
+storage = "u16"
+encode = "v * 100"
+[sim.sensors.inputs]
+cdu_env_temp = "cdu.env.temp"
+cdu_env_rh = "cdu.env.rh"
+
+# ===================== 派生量（computed_devices，地址 1601-1609） =====================
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.t4_t1"
+name = "Approach Temperature (T4-T1)"
+kind = "temperature"
+unit = "°C"
+formula = "t4 - t1"
+address = 1601
+storage = "u16"
+encode = "v * 10"
+[sim.sensors.inputs]
+t4 = "cdu.sec.in.t4"
+t1 = "cdu.pri.in.t1"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.cap"
+name = "Cooling Capacity"
+kind = "other"
+unit = "kW"
+formula = "abs(t3 - t4) * f2 * 4186 * 0.6 / 10000"          # $Cp=4186 J/(kg·K)（水）；温差取绝对值
+address = 1602
+storage = "u16"
+[sim.sensors.inputs]
+t3 = "cdu.sec.out.t3"
+t4 = "cdu.sec.in.t4"
+f2 = "cdu.sec.aux.f2"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.p4_p3"
+name = "Differential Pressure (P4-P3)"
+kind = "pressure"
+unit = "PSI"
+formula = "p4 - p3"
+address = 1603
+storage = "u16"
+encode = "4000 + v * 106.667"
+[sim.sensors.inputs]
+p4 = "cdu.sec.in.p4"
+p3 = "cdu.sec.out.p3"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.f1"
+name = "Total Flow (F1)"
+kind = "flow"
+unit = "LPM"
+formula = "f1"
+address = 1604
+storage = "u16"
+encode = "4000 + v * 53.512"
+[sim.sensors.inputs]
+f1 = "cdu.pri.in.f1"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.p1_p2"
+name = "P1 - P2"
+kind = "pressure"
+unit = "PSI"
+formula = "p1 - p2"
+address = 1606
+storage = "u16"
+encode = "4000 + v * 106.667"
+[sim.sensors.inputs]
+p1 = "cdu.pri.in.p1"
+p2 = "cdu.pri.out.p2"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.t3_dew"
+name = "T3 - DewPoint"
+kind = "temperature"
+unit = "°C"
+formula = "t3 - cdu_env_dew"
+address = 1607
+storage = "u16"
+encode = "v * 10"
+[sim.sensors.inputs]
+t3 = "cdu.sec.out.t3"
+cdu_env_dew = "cdu.env.dewpoint"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.t4_dew"
+name = "T4 - DewPoint"
+kind = "temperature"
+unit = "°C"
+formula = "t4 - cdu_env_dew"
+address = 1608
+storage = "u16"
+encode = "v * 10"
+[sim.sensors.inputs]
+t4 = "cdu.sec.in.t4"
+cdu_env_dew = "cdu.env.dewpoint"
+
+[[sim.sensors]]
+sensor_id = "cdu.computed.dew_tenv"
+name = "DewPoint - Ambient"
+kind = "temperature"
+unit = "°C"
+formula = "cdu_env_dew - cdu_env_temp"
+address = 1609
+storage = "u16"
+encode = "v * 10"
+[sim.sensors.inputs]
+cdu_env_dew = "cdu.env.dewpoint"
+cdu_env_temp = "cdu.env.temp"

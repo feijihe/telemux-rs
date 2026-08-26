@@ -55,6 +55,20 @@ pub struct SimControl {
     /// 是否可写（Modbus 写保持寄存器可改变 duty）。
     #[serde(default)]
     pub writable: bool,
+    /// 显式保持寄存器地址（0x0000 起；缺省按配置顺序紧凑分配）。
+    #[serde(default)]
+    pub address: Option<u16>,
+}
+
+/// 传感器寄存器存储格式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Storage {
+    /// f32 双字（Big 字序，占 2 个输入寄存器），默认。
+    #[default]
+    F32,
+    /// u16 单字（占 1 个输入寄存器），物理值经 `encode` 编码为原始整数。
+    U16,
 }
 
 /// 仿真传感器：由稳态表达式求值，作为测量值产出。
@@ -83,6 +97,16 @@ pub struct SimSensor {
     /// 变量名 → 引用的传感器/控制变量（可选，显式依赖映射）。
     #[serde(default)]
     pub inputs: std::collections::HashMap<String, String>,
+    /// 显式输入寄存器起始地址（0x0000 起；缺省按配置顺序紧凑分配）。
+    #[serde(default)]
+    pub address: Option<u16>,
+    /// 寄存器存储格式（f32 双字 | u16 单字）。
+    #[serde(default)]
+    pub storage: Storage,
+    /// u16 存储时：物理值 → 原始整数的编码表达式（变量 `v` = 物理值）。
+    /// 缺省为 `v`（直接取整），即解码公式为恒等。
+    #[serde(default)]
+    pub encode: Option<String>,
 }
 
 impl SimConfig {
@@ -119,12 +143,21 @@ impl SimConfig {
         Ok(cfg)
     }
 
-    /// 校验：控制变量名唯一、传感器 id 唯一、表达式可解析、inputs 目标存在。
+    /// 校验：控制变量名唯一、传感器 id 唯一、表达式可解析、inputs 目标存在、
+    /// 显式寄存器地址不冲突。
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut controls: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut holding_addrs: Vec<(u16, u16)> = Vec::new(); // (start, end)
         for c in &self.controls {
             if !controls.insert(c.name.as_str()) {
                 anyhow::bail!("duplicate sim control `{}`", c.name);
+            }
+            if let Some(a) = c.address {
+                let span = (a, a);
+                if holding_addrs.iter().any(|(s, e)| span_overlap(&span, s, e)) {
+                    anyhow::bail!("sim control `{}`: holding address {a} overlaps another control", c.name);
+                }
+                holding_addrs.push(span);
             }
         }
         let mut ids: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -134,7 +167,26 @@ impl SimConfig {
                 anyhow::bail!("duplicate sim sensor_id `{}`", s.sensor_id);
             }
         }
-        // 第二遍：校验 name/formula/inputs 目标。
+        // 显式输入地址冲突检测（f32 占 2 字，u16 占 1 字）。
+        let mut input_spans: Vec<(u16, u16)> = Vec::new();
+        for s in self.iter_sensors() {
+            if let Some(a) = s.address {
+                let w = match s.storage {
+                    Storage::F32 => 2u16,
+                    Storage::U16 => 1u16,
+                };
+                let span = (a, a.saturating_add(w).saturating_sub(1));
+                if input_spans.iter().any(|(s0, e0)| span_overlap(&span, s0, e0)) {
+                    anyhow::bail!(
+                        "sim sensor `{}`: input address {a}..{} overlaps another sensor",
+                        s.sensor_id,
+                        span.1
+                    );
+                }
+                input_spans.push(span);
+            }
+        }
+        // 第二遍：校验 name/formula/inputs 目标/encode。
         for s in self.iter_sensors() {
             if s.name.is_empty() {
                 anyhow::bail!("sim sensor `{}`: name is required", s.sensor_id);
@@ -146,6 +198,15 @@ impl SimConfig {
                     s.formula
                 )
             })?;
+            if let Some(enc) = &s.encode {
+                meval::Expr::from_str(enc).map_err(|e| {
+                    anyhow::anyhow!(
+                        "sim sensor `{}`: invalid encode `{}`: {e}",
+                        s.sensor_id,
+                        enc
+                    )
+                })?;
+            }
             for (var, target) in &s.inputs {
                 if !controls.contains(target.as_str()) && !ids.contains(target.as_str()) {
                     anyhow::bail!(
@@ -157,6 +218,11 @@ impl SimConfig {
         }
         Ok(())
     }
+}
+
+/// 区间是否重叠（半开区间处理）。
+fn span_overlap((s, e): &(u16, u16), os: &u16, oe: &u16) -> bool {
+    s <= oe && e >= os
 }
 
 /// 仿真状态：控制变量当前值 + 求值引擎。
@@ -380,12 +446,14 @@ mod tests {
                     initial: 50.0,
                     unit: Some("%".into()),
                     writable: true,
+                    address: None,
                 },
                 SimControl {
                     name: "valve1_duty".into(),
                     initial: 40.0,
                     unit: Some("%".into()),
                     writable: true,
+                    address: None,
                 },
             ],
             sensors: vec![
@@ -396,6 +464,9 @@ mod tests {
                     unit: Some("L/min".into()),
                     formula: "pump1_duty * 2".into(),
                     inputs: Default::default(),
+                    address: None,
+                    storage: Storage::F32,
+                    encode: None,
                 },
                 SimSensor {
                     sensor_id: "cdu.f1_flow".into(),
@@ -404,6 +475,9 @@ mod tests {
                     unit: Some("L/min".into()),
                     formula: "valve1_duty * 1.5".into(),
                     inputs: Default::default(),
+                    address: None,
+                    storage: Storage::F32,
+                    encode: None,
                 },
                 SimSensor {
                     sensor_id: "cdu.t2_out".into(),
@@ -412,6 +486,9 @@ mod tests {
                     unit: Some("°C".into()),
                     formula: "45 - f1_flow * 0.1".into(),
                     inputs: [("f1_flow".to_string(), "cdu.f1_flow".to_string())].into(),
+                    address: None,
+                    storage: Storage::F32,
+                    encode: None,
                 },
             ],
             pri: None,
@@ -463,6 +540,47 @@ mod tests {
         assert!(!pri.input.is_empty() && !pri.output.is_empty() && !pri.auxiliary.is_empty());
         assert!(!sec.input.is_empty() && !sec.output.is_empty() && !sec.auxiliary.is_empty());
         assert!(!cfg.sensors.is_empty()); // 水箱/环境/泄漏等全局未分组
+        // 全量求值无环无错。
+        let engine = SimEngine::new(cfg);
+        let all = engine.eval_all();
+        assert_eq!(all.len(), engine.config().iter_sensors().count());
+    }
+
+    /// cdu2 适配配置：显式地址 + u16 存储全量加载并求值。
+    #[test]
+    fn loads_cdu2_config() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/cdu2.toml");
+        let cfg = SimConfig::load(&path).expect("load cdu2.toml");
+        let pri = cfg.pri.as_ref().expect("pri present");
+        let sec = cfg.sec.as_ref().expect("sec present");
+        // 用户指定分组：F1/T1/P1 → pri.in；T2/P2 → pri.out；T3/P3 → sec.out；T4/P4 → sec.in。
+        let pri_in_ids: Vec<&str> = pri.input.iter().map(|s| s.sensor_id.as_str()).collect();
+        let pri_out_ids: Vec<&str> = pri.output.iter().map(|s| s.sensor_id.as_str()).collect();
+        let sec_in_ids: Vec<&str> = sec.input.iter().map(|s| s.sensor_id.as_str()).collect();
+        let sec_out_ids: Vec<&str> = sec.output.iter().map(|s| s.sensor_id.as_str()).collect();
+        assert!(pri_in_ids.contains(&"cdu.pri.in.f1"));
+        assert!(pri_in_ids.contains(&"cdu.pri.in.t1"));
+        assert!(pri_in_ids.contains(&"cdu.pri.in.p1"));
+        assert!(pri_out_ids.contains(&"cdu.pri.out.t2"));
+        assert!(pri_out_ids.contains(&"cdu.pri.out.p2"));
+        assert!(sec_out_ids.contains(&"cdu.sec.out.t3"));
+        assert!(sec_out_ids.contains(&"cdu.sec.out.p3"));
+        assert!(sec_in_ids.contains(&"cdu.sec.in.t4"));
+        assert!(sec_in_ids.contains(&"cdu.sec.in.p4"));
+        // 显式地址对应 cdu2.yaml。
+        let by_id: HashMap<_, _> = cfg
+            .iter_sensors()
+            .map(|s| (s.sensor_id.as_str(), s.address))
+            .collect();
+        assert_eq!(by_id["cdu.pri.in.t1"], Some(3328));
+        assert_eq!(by_id["cdu.pri.out.t2"], Some(3329));
+        assert_eq!(by_id["cdu.sec.out.t3"], Some(3330));
+        assert_eq!(by_id["cdu.sec.in.t4"], Some(3331));
+        assert_eq!(by_id["cdu.pri.in.p1"], Some(3392));
+        assert_eq!(by_id["cdu.pri.out.p2"], Some(3393));
+        assert_eq!(by_id["cdu.sec.out.p3"], Some(3394));
+        assert_eq!(by_id["cdu.sec.in.p4"], Some(3395));
+        assert_eq!(by_id["cdu.pri.in.f1"], Some(3397));
         // 全量求值无环无错。
         let engine = SimEngine::new(cfg);
         let all = engine.eval_all();

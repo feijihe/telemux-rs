@@ -40,9 +40,21 @@ export function RegisterTable({ state }: { state: SimState }) {
               <TableCell className="font-mono text-muted-foreground">{hex(inp.addr)}</TableCell>
               <TableCell>{inp.sensor ?? <span className="text-muted-foreground">空</span>}</TableCell>
               <TableCell className="font-mono tabular-nums">
-                {inp.raw_hi} {inp.raw_lo}
+                {inp.storage === "u16" ? (
+                  <span className="font-semibold">{inp.raw_hi}</span>
+                ) : (
+                  <>
+                    {inp.raw_hi} {inp.raw_lo}
+                  </>
+                )}
               </TableCell>
-              <TableCell className="font-mono tabular-nums">{inp.value_f32.toFixed(3)}</TableCell>
+              <TableCell className="font-mono tabular-nums">
+                {inp.storage === "u16" ? (
+                  <span className="text-muted-foreground">u16 原始值</span>
+                ) : (
+                  inp.value_f32?.toFixed(3) ?? "—"
+                )}
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

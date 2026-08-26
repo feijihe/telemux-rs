@@ -152,7 +152,7 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         .map(&sensor_json)
         .collect();
 
-    // 寄存器地图原始值：保持区（u16）+ 输入区（f32 解码）。
+    // 寄存器地图原始值：保持区（u16）+ 输入区（f32 解码 / u16 原始）。
     let holding: Vec<Value> = (0..slave.map.holding.len())
         .map(|i| {
             json!({
@@ -169,17 +169,41 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         let mut out = Vec::new();
         let mut i = 0;
         while i < slave.map.inputs.len() {
-            let hi = slave.map.read_input(&engine, i);
-            let lo = slave.map.read_input(&engine, i + 1);
-            let f = f32::from_bits(((hi as u32) << 16) | lo as u32);
-            out.push(json!({
-                "addr": i,
-                "sensor": slave.map.inputs[i].as_ref().map(|s| s.sensor_id.clone()),
-                "raw_hi": hi,
-                "raw_lo": lo,
-                "value_f32": f,
-            }));
-            i += 2;
+            let slot = match slave.map.inputs[i].as_ref() {
+                Some(s) => s,
+                None => {
+                    i += 1;
+                    continue;
+                }
+            };
+            match slot.storage {
+                crate::model::Storage::F32 => {
+                    let hi = slave.map.read_input(&engine, i);
+                    let lo = slave.map.read_input(&engine, i + 1);
+                    let f = f32::from_bits(((hi as u32) << 16) | lo as u32);
+                    out.push(json!({
+                        "addr": i,
+                        "sensor": slot.sensor_id.clone(),
+                        "storage": "f32",
+                        "raw_hi": hi,
+                        "raw_lo": lo,
+                        "value_f32": f,
+                    }));
+                    i += 2;
+                }
+                crate::model::Storage::U16 => {
+                    let raw = slave.map.read_input(&engine, i);
+                    out.push(json!({
+                        "addr": i,
+                        "sensor": slot.sensor_id.clone(),
+                        "storage": "u16",
+                        "raw_hi": raw,
+                        "raw_lo": null,
+                        "value_f32": null,
+                    }));
+                    i += 1;
+                }
+            }
         }
         out
     };

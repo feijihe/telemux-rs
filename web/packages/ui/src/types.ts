@@ -33,13 +33,15 @@ export interface HoldingEntry {
   raw: number;
 }
 
-/** 寄存器地图输入区条目（f32 双字） */
+/** 寄存器地图输入区条目（f32 双字或 u16 单字） */
 export interface InputEntry {
   addr: number;
   sensor: string | null;
+  /** "f32"（双字）| "u16"（单字） */
+  storage?: "f32" | "u16";
   raw_hi: number;
-  raw_lo: number;
-  value_f32: number;
+  raw_lo: number | null;
+  value_f32: number | null;
 }
 
 /** 模拟器完整状态 */
