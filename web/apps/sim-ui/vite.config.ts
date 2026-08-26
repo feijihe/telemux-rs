@@ -21,7 +21,10 @@ export default defineConfig({
   server: {
     port: 5180,
     proxy: {
-      "/api": "http://127.0.0.1:8082",
+      "/api": {
+        target: "http://127.0.0.1:8082",
+        ws: true, // /api/ws WebSocket 升级需要代理转发
+      },
     },
   },
 });
