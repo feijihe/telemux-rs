@@ -5,6 +5,7 @@ packages:
 # pnpm catalogs：单一版本源，供各包用 `catalog:` 引用（对应 Rust workspace
 # 的 [workspace.dependencies]）。改版本只需改这里，全仓同步。
 catalog:
+  "@base-ui/react": ^1.7.0
   # 运行时
   react: ^19.0.0
   react-dom: ^19.0.0

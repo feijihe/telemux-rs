@@ -2,6 +2,11 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* 共享包 @telemux/ui 经 pnpm 符号链接挂在 node_modules 下，Tailwind v4 默认
+   只扫描当前 app 源码、排除 node_modules，故需显式把其源码目录纳入扫描，
+   否则 shadcn 组件源码里的工具类（bg-primary / h-8 / group/button 等）不会生成。 */
+@source "../../../packages/ui/src";
+
 @custom-variant dark (&:is(.dark *));
 
 /* shadcn/ui nova 主题（tailwind 4 CSS-first，oklch 变量） */

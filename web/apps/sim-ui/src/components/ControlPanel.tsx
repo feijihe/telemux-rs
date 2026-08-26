@@ -40,12 +40,12 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
 
   return (
     <div className="flex items-center gap-2 py-1">
-      <Label className="w-36 shrink-0 text-xs text-muted-foreground">{def.label}</Label>
+      <Label className="w-24 shrink-0 text-xs text-right text-muted-foreground">{def.label}</Label>
       <Input
         type="number"
         step={def.step}
         value={local}
-        className="h-8 w-24"
+        className="h-8 w-32"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         onChange={(e) => setLocal(e.target.value)}
@@ -53,10 +53,10 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
           if (e.key === "Enter") void apply();
         }}
       />
-      <Button type="button" size="sm" variant="secondary" onClick={() => void apply()}>
+      <Button type="button" size="sm" onClick={() => void apply()}>
         应用
       </Button>
-      <Badge variant="outline" className="w-20 justify-end font-mono tabular-nums">
+      <Badge className="w-15 justify-end font-mono tabular-nums">
         {value} {def.unit}
       </Badge>
     </div>
