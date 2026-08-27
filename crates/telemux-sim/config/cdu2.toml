@@ -10,8 +10,8 @@
 #   T2, P2     → pri.out（一次侧出口）
 #   T3, P3     → sec.out（二次侧出口）
 #   T4, P4     → sec.in（二次侧入口）
-# 泵/阀/环境/派生量按 cdu2.yaml 语义归入 aux 或全局。线圈设备（LE1/LI1/LI2）
-# 暂不模拟（sim 不暴露线圈）。
+# 泵/阀/环境/派生量按 cdu2.yaml 语义归入 aux 或全局。线圈设备
+# （LE1 泄漏、LI1/LI2 液位）以 area = "coils" 暴露为布尔量（功能码 0x01）。
 #
 # 用法：
 #   cargo run -p telemux-sim -- --config config/cdu2.toml \
@@ -434,3 +434,46 @@ encode = "v * 10"
 [sim.sensors.inputs]
 cdu_env_dew = "cdu.env.dewpoint"
 cdu_env_temp = "cdu.env.temp"
+
+# ===================== 线圈设备（read_coils，布尔量） =====================
+# cdu2.yaml：Leakages.LE1（value@24、break@25）、Liquids.LI1@0、LI2@1。
+
+[[sim.sensors]]
+sensor_id = "cdu.leak.le1"
+name = "Leak Sensor LE1"
+kind = "leak"
+unit = "leak"
+formula = "0"                       # 0 = 无泄漏（逻辑量）
+area = "coils"
+storage = "u16"
+address = 24                        # Leakages.LE1.value
+
+[[sim.sensors]]
+sensor_id = "cdu.leak.le1.break"
+name = "Leak Break LE1"
+kind = "leak"
+unit = "leak"
+formula = "0"                       # 0 = 无泄漏断路（逻辑量）
+area = "coils"
+storage = "u16"
+address = 25                        # Leakages.LE1.break
+
+[[sim.sensors]]
+sensor_id = "cdu.liquid.li1"
+name = "Liquid Level LI1"
+kind = "level"
+unit = "level"
+formula = "1"                       # 1 = 液位正常（逻辑量）
+area = "coils"
+storage = "u16"
+address = 0                         # Liquids.LI1
+
+[[sim.sensors]]
+sensor_id = "cdu.liquid.li2"
+name = "Liquid Level LI2"
+kind = "level"
+unit = "level"
+formula = "1"                       # 1 = 液位正常（逻辑量）
+area = "coils"
+storage = "u16"
+address = 1                         # Liquids.LI2

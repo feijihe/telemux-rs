@@ -48,11 +48,14 @@ pub struct RegisterMap {
     pub holding: Vec<Option<HoldingSlot>>,
     /// 输入区（传感器）。
     pub inputs: Vec<Option<InputSlot>>,
+    /// 线圈区（布尔量传感器，功能码 0x01）。
+    pub coils: Vec<Option<InputSlot>>,
 }
 
 impl RegisterMap {
     /// 从配置构建地图。控制变量按显式地址或配置顺序进保持区；
-    /// 传感器按 `area` 进保持区（只读）或输入区，支持显式地址（f32 占 2 字，u16 占 1 字）。
+    /// 传感器按 `area` 进保持区（只读）、输入区或线圈区，支持显式地址
+    /// （f32 占 2 字，u16/线圈占 1 字）。
     pub fn build(sim: &SimConfig) -> Self {
         let mut map = RegisterMap::default();
         // 保持区：先放显式地址（按配置顺序，稀疏填充），再紧凑追加无地址项。
@@ -68,8 +71,9 @@ impl RegisterMap {
             });
             next_holding = addr + 1;
         }
-        // 传感器：按 area 分到保持区或输入区。
+        // 传感器：按 area 分到保持区、输入区或线圈区。
         let mut next_input = 0usize;
+        let mut next_coils = 0usize;
         for s in sim.iter_sensors() {
             let width = match s.storage {
                 Storage::F32 => 2usize,
@@ -77,7 +81,7 @@ impl RegisterMap {
             };
             let (vec, next): (&mut Vec<Option<HoldingSlot>>, &mut usize) = match s.area {
                 Area::Holding => (&mut map.holding, &mut next_holding),
-                Area::Input => continue, // 输入区在下方单独处理
+                _ => continue, // 输入区/线圈区在下方单独处理
             };
             let addr = s.address.map(|a| a as usize).unwrap_or(*next);
             let end = addr + width;
@@ -119,6 +123,21 @@ impl RegisterMap {
             }
             next_input = addr + width;
         }
+        for s in sim.iter_sensors() {
+            if s.area != Area::Coils {
+                continue;
+            }
+            let addr = s.address.map(|a| a as usize).unwrap_or(next_coils);
+            while map.coils.len() <= addr {
+                map.coils.push(None);
+            }
+            map.coils[addr] = Some(InputSlot {
+                sensor_id: s.sensor_id.clone(),
+                storage: s.storage,
+                encode: s.encode.clone(),
+            });
+            next_coils = addr + 1;
+        }
         map
     }
 
@@ -141,6 +160,17 @@ impl RegisterMap {
             Some(slot) => read_sensor(engine, slot, addr),
             None => 0,
         }
+    }
+
+    /// 读取线圈（布尔量）：物理值非零为 ON。
+    pub fn read_coil(&self, engine: &SimEngine, addr: usize) -> bool {
+        let slot = match self.coils.get(addr).and_then(|s| s.as_ref()) {
+            Some(s) => s,
+            None => return false,
+        };
+        let values: HashMap<String, f64> = engine.eval_all().into_iter().collect();
+        let v = values.get(&slot.sensor_id).copied().unwrap_or(0.0);
+        v.abs() > 0.5
     }
 }
 
@@ -399,6 +429,112 @@ mod tests {
                 storage: Storage::U16,
                 encode: None,
             }],
+            pri: None,
+            sec: None,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    /// 线圈区：布尔量传感器（LI1@0、LI2@1、LE1@24/25），功能码 01 读取。
+    #[test]
+    fn coils_area_readable() {
+        let cfg = SimConfig {
+            controls: vec![],
+            sensors: vec![
+                SimSensor {
+                    sensor_id: "cdu.liquid.li1".into(),
+                    name: "LI1".into(),
+                    kind: "level".into(),
+                    unit: Some("level".into()),
+                    formula: "1".into(),
+                    inputs: Default::default(),
+                    address: Some(0),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+                SimSensor {
+                    sensor_id: "cdu.liquid.li2".into(),
+                    name: "LI2".into(),
+                    kind: "level".into(),
+                    unit: Some("level".into()),
+                    formula: "1".into(),
+                    inputs: Default::default(),
+                    address: Some(1),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+                SimSensor {
+                    sensor_id: "cdu.leak.le1".into(),
+                    name: "LE1".into(),
+                    kind: "leak".into(),
+                    unit: Some("leak".into()),
+                    formula: "0".into(), // 无泄漏
+                    inputs: Default::default(),
+                    address: Some(24),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+                SimSensor {
+                    sensor_id: "cdu.leak.le1.break".into(),
+                    name: "LE1 Break".into(),
+                    kind: "leak".into(),
+                    unit: Some("leak".into()),
+                    formula: "1".into(), // 泄漏断路
+                    inputs: Default::default(),
+                    address: Some(25),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+            ],
+            pri: None,
+            sec: None,
+        };
+        cfg.validate().expect("validate ok");
+        let map = RegisterMap::build(&cfg);
+        let engine = SimEngine::new(cfg);
+        assert_eq!(map.coils.len(), 26); // 0..=25
+        assert!(map.read_coil(&engine, 0)); // LI1 ON
+        assert!(map.read_coil(&engine, 1)); // LI2 ON
+        assert!(!map.read_coil(&engine, 24)); // LE1 无泄漏 OFF
+        assert!(map.read_coil(&engine, 25)); // LE1 break ON
+        assert!(!map.read_coil(&engine, 10)); // 空槽位 OFF
+    }
+
+    /// 线圈区地址冲突被拒绝。
+    #[test]
+    fn coils_area_conflict_rejected() {
+        let cfg = SimConfig {
+            controls: vec![],
+            sensors: vec![
+                SimSensor {
+                    sensor_id: "a".into(),
+                    name: "A".into(),
+                    kind: "leak".into(),
+                    unit: None,
+                    formula: "1".into(),
+                    inputs: Default::default(),
+                    address: Some(5),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+                SimSensor {
+                    sensor_id: "b".into(),
+                    name: "B".into(),
+                    kind: "leak".into(),
+                    unit: None,
+                    formula: "1".into(),
+                    inputs: Default::default(),
+                    address: Some(5),
+                    area: Area::Coils,
+                    storage: Storage::U16,
+                    encode: None,
+                },
+            ],
             pri: None,
             sec: None,
         };

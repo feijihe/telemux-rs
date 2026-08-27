@@ -50,17 +50,19 @@ curl localhost:8000/redfish/v1/Chassis/cdu-01/Sensors
 - **显式地址**：`SimControl.address`（保持寄存器）与 `SimSensor.address`（输入或
   保持寄存器）指定寄存器地址（0x0000 起，稀疏填充）。缺省仍按顺序紧凑分配
   （兼容原 cdu.toml）。
-- **寄存器区**：`SimSensor.area = "input"`（默认，输入寄存器 0x04）或
+- **寄存器区**：`SimSensor.area = "input"`（默认，输入寄存器 0x04）、
   `"holding"`（保持寄存器 0x03 的**只读槽位**，对齐真实 CDU 中
-  `read_holding_registers` 的测量点——Modbus 工具用功能码 03 即可读取）。
+  `read_holding_registers` 的测量点——Modbus 工具用功能码 03 即可读取）或
+  `"coils"`（线圈区 0x01 的**布尔量**，对齐 `read_coils` 的泄漏/液位等
+  开关量——功能码 01 读取，只读拒绝写入）。
 - **u16 单字存储**：`SimSensor.storage = "u16"` 使传感器占 1 个寄存器（默认
   `"f32"` 占 2 字 Big 字序）。`encode` 给出物理值 → 原始整数的编码表达式（变量
   `v`），使模拟器暴露的原始寄存器与真实 CDU 一致——网关按 cdu2.yaml 的解码公式
   （如 T = raw/10）即可还原物理值。
 
 物理分组（cdu2.yaml → cdu2.toml）：F1/T1/P1 → `pri.in`，T2/P2 → `pri.out`，
-T3/P3 → `sec.out`，T4/P4 → `sec.in`；泵/阀/环境/派生量按语义归 aux 或全局。
-线圈设备（LE1/LI1/LI2）暂不模拟。
+T3/P3 → `sec.out`，T4/P4 → `sec.in`；泵/阀/环境/派生量按语义归 aux 或全局；
+线圈设备（LE1 泄漏、LI1/LI2 液位）以 `area = "coils"` 暴露为布尔量。
 
 ```toml
 [sim]
@@ -81,6 +83,17 @@ address = 3328          # 显式寄存器地址（cdu2.yaml Temperatures.T1）
 area = "holding"        # 保持寄存器区（功能码 03 可读，对齐 read_holding_registers）
 storage = "u16"         # 单字原始寄存器
 encode = "v * 10"       # 物理值 → 原始整数（逆解码公式：raw = 物理 × 10）
+
+# 线圈（布尔量，功能码 01）
+[[sim.sensors]]
+sensor_id = "cdu.liquid.li1"
+name = "Liquid Level LI1"
+kind = "level"
+unit = "level"
+formula = "1"           # 1 = 液位正常（逻辑量）
+area = "coils"
+storage = "u16"
+address = 0             # cdu2.yaml Liquids.LI1
 ```
 
 变量解析规则：`inputs` 映射 → 控制变量名 → 内置时间 `t` → 传感器短名。
@@ -93,11 +106,12 @@ encode = "v * 10"       # 物理值 → 原始整数（逆解码公式：raw = �
 |---|---|---|---|
 | 保持寄存器 | 0x0000 起 | 控制变量（u16，0-100）+ `area="holding"` 的只读传感器 | **读**；控制变量可写 |
 | 输入寄存器 | 0x0000 起 | 传感器（默认 `area="input"`；f32 双字 Big 字序，或 u16 单字原始值） | 只读 |
+| 线圈 | 0x0000 起 | `area="coils"` 的布尔量传感器（泄漏/液位等开关量） | 只读（功能码 01） |
 
 地址按配置顺序确定性 append；配置 `address` 字段后可显式指定（稀疏填充）。
 网关侧 `crates/telemux/config/cdu-gateway.toml` 把 `[[devices.registers]]`
 映射到这些地址（`function="holding"` 的 duty 可写，`function="input"` 的
-传感器 f32 双字或 u16 单字）。
+传感器 f32 双字或 u16 单字；线圈用 `function="coil"`）。
 
 ## 4. 网页 UI
 

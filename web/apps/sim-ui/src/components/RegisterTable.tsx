@@ -83,6 +83,25 @@ export function RegisterTable({ state }: { state: SimState }) {
               </TableCell>
             </TableRow>
           ))}
+          {state.coils.map((c) => (
+            <TableRow key={`c-${c.addr}`}>
+              <TableCell>
+                <Badge className="font-normal" variant={c.value ? "default" : "outline"}>
+                  线圈
+                </Badge>
+              </TableCell>
+              <TableCell className="font-mono text-muted-foreground">{hex(c.addr)}</TableCell>
+              <TableCell>{c.sensor ?? <span className="text-muted-foreground">空</span>}</TableCell>
+              <TableCell className="font-mono tabular-nums">{c.value ? "ON" : "OFF"}</TableCell>
+              <TableCell>
+                {c.value ? (
+                  <span className="text-emerald-600">true</span>
+                ) : (
+                  <span className="text-muted-foreground">false</span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </div>

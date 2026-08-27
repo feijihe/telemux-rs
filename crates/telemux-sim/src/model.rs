@@ -81,6 +81,9 @@ pub enum Area {
     /// 保持寄存器区（功能码 0x03，只读槽位）——对齐真实 CDU 中
     /// `read_holding_registers` 的传感器。
     Holding,
+    /// 线圈区（功能码 0x01，布尔量）——对齐真实 CDU 中 `read_coils`
+    /// 的泄漏/液位等开关量传感器。
+    Coils,
 }
 
 /// 仿真传感器：由稳态表达式求值，作为测量值产出。
@@ -185,9 +188,10 @@ impl SimConfig {
                 anyhow::bail!("duplicate sim sensor_id `{}`", s.sensor_id);
             }
         }
-        // 显式地址冲突检测：保持区（控制 + holding 传感器）与输入区各自独立编址，
-        // 区内不允许重叠（f32 占 2 字，u16 占 1 字）。
+        // 显式地址冲突检测：保持区（控制 + holding 传感器）、输入区、线圈区
+        // 各自独立编址，区内不允许重叠（f32 占 2 字，u16/线圈占 1 字）。
         let mut input_spans: Vec<(u16, u16)> = Vec::new();
+        let mut coils_spans: Vec<(u16, u16)> = Vec::new();
         for s in self.iter_sensors() {
             let Some(a) = s.address else { continue };
             let w = match s.storage {
@@ -198,6 +202,7 @@ impl SimConfig {
             let spans = match s.area {
                 Area::Holding => &mut holding_spans,
                 Area::Input => &mut input_spans,
+                Area::Coils => &mut coils_spans,
             };
             if spans.iter().any(|(s0, e0)| span_overlap(&span, s0, e0)) {
                 anyhow::bail!(

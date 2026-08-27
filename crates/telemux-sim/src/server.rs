@@ -76,8 +76,16 @@ fn handle(state: Arc<SimSlaveState>, req: Request<'static>) -> Result<Response, 
             }
             Ok(Response::WriteMultipleRegisters(addr, words.len() as u16))
         }
-        // 无线圈/离散输入。
-        Request::ReadCoils(..) | Request::ReadDiscreteInputs(..) | Request::WriteSingleCoil(..) => {
+        Request::ReadCoils(addr, cnt) => {
+            let engine = state.engine.lock().map_err(|_| ExceptionCode::ServerDeviceFailure)?;
+            let bits: Vec<bool> = (0..cnt as usize)
+                .map(|i| state.map.read_coil(&engine, addr as usize + i))
+                .collect();
+            Ok(Response::ReadCoils(bits))
+        }
+        // 线圈只读（对齐真实 CDU 中 read_coils 的开关量测量点）；
+        // 无离散输入区，写线圈拒绝。
+        Request::ReadDiscreteInputs(..) | Request::WriteSingleCoil(..) => {
             Err(ExceptionCode::IllegalFunction)
         }
         _ => Err(ExceptionCode::IllegalFunction),

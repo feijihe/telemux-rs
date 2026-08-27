@@ -56,6 +56,14 @@ export interface SimState {
   sensors: SimSensor[];
   holding: HoldingEntry[];
   inputs: InputEntry[];
+  coils: CoilEntry[];
+}
+
+/** 寄存器地图线圈区条目（布尔量） */
+export interface CoilEntry {
+  addr: number;
+  sensor: string | null;
+  value: boolean;
 }
 
 /** 回路侧分组（一次/二次侧 in/out/aux） */

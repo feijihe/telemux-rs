@@ -220,6 +220,16 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         out
     };
 
+    let coils: Vec<Value> = (0..slave.map.coils.len())
+        .map(|i| {
+            json!({
+                "addr": i,
+                "sensor": slave.map.coils[i].as_ref().map(|s| s.sensor_id.clone()),
+                "value": slave.map.read_coil(&engine, i),
+            })
+        })
+        .collect();
+
     json!({
         "controls": controls,
         "pri": pri,
@@ -227,5 +237,6 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         "sensors": sensors,
         "holding": holding,
         "inputs": inputs,
+        "coils": coils,
     })
 }
