@@ -48,7 +48,7 @@ address = 3424               # Valve1.DutyCycle
 # ---- 一次侧入口：F1, T1, P1 ----
 [[sim.pri.in]]
 sensor_id = "cdu.pri.in.f1"
-name = "Primary Inlet Flow F1"
+name = "F1"
 kind = "flow"
 unit = "LPM"
 formula = "8 + valve1_duty * 0.9 + 0.6 * cos(t)"            # 比例阀开度↑ → 一次侧流量↑
@@ -59,7 +59,7 @@ encode = "4000 + v * 53.512" # 逆 cdu2: value = (raw-4000)/1000*18.6875
 
 [[sim.pri.in]]
 sensor_id = "cdu.pri.in.t1"
-name = "Primary Inlet T1 (cold)"
+name = "T1"
 kind = "temperature"
 unit = "°C"
 formula = "12 + 0.5 * sin(t)"                               # 一次侧冷水供水温度
@@ -70,7 +70,7 @@ encode = "v * 10"            # 逆 cdu2: value = raw/10
 
 [[sim.pri.in]]
 sensor_id = "cdu.pri.in.p1"
-name = "Primary Inlet P1"
+name = "P1"
 kind = "pressure"
 unit = "PSI"
 formula = "40 + valve1_duty * 0.15 + 0.2 * sin(t/2)"        # 阀开度越大，进口压力越高
@@ -82,7 +82,7 @@ encode = "4000 + v * 106.667" # 逆 cdu2: value = (raw-4000)/16000*150
 # ---- 一次侧出口：T2, P2 ----
 [[sim.pri.out]]
 sensor_id = "cdu.pri.out.t2"
-name = "Primary Outlet T2 (warmed)"
+name = "T2"
 kind = "temperature"
 unit = "°C"
 formula = "t1 + 2.5 + 0.2 * sin(t/3)"                       # 冷水经板换被二次侧加热升温
@@ -95,7 +95,7 @@ t1 = "cdu.pri.in.t1"
 
 [[sim.pri.out]]
 sensor_id = "cdu.pri.out.p2"
-name = "Primary Outlet P2"
+name = "P2"
 kind = "pressure"
 unit = "PSI"
 formula = "p1 - 0.8 + 0.1 * cos(t/2)"                       # 阀后压损
@@ -123,7 +123,7 @@ encode = "v * 1000"          # 逆 cdu2: value = raw/1000
 # ---- 二次侧入口：T4, P4（服务器回水） ----
 [[sim.sec.in]]
 sensor_id = "cdu.sec.in.t4"
-name = "From Server T4 (hot return)"
+name = "T4"
 kind = "temperature"
 unit = "°C"
 formula = "45 + 0.5 * sin(t/3)"                             # 服务器热回水
@@ -134,7 +134,7 @@ encode = "v * 10"
 
 [[sim.sec.in]]
 sensor_id = "cdu.sec.in.p4"
-name = "From Server P4"
+name = "P4"
 kind = "pressure"
 unit = "PSI"
 formula = "50 + (pump1_duty + pump2_duty) * 0.2 + 0.3 * cos(t/2)"  # 泵出口压力随出力
@@ -146,7 +146,7 @@ encode = "4000 + v * 106.667"
 # ---- 二次侧出口：T3, P3（服务器供水） ----
 [[sim.sec.out]]
 sensor_id = "cdu.sec.out.t3"
-name = "To Server T3 (cooled supply)"
+name = "T3"
 kind = "temperature"
 unit = "°C"
 formula = "t4 - f1 * 0.15 + 0.3 * sin(t/4)"                 # 一次侧冷水流量↑ → 二次侧供水降温
@@ -160,7 +160,7 @@ f1 = "cdu.pri.in.f1"
 
 [[sim.sec.out]]
 sensor_id = "cdu.sec.out.p3"
-name = "To Server P3"
+name = "P3"
 kind = "pressure"
 unit = "PSI"
 formula = "p4 - 1.2 + 0.2 * cos(t/3)"                       # 服务器侧压损
@@ -174,7 +174,7 @@ p4 = "cdu.sec.in.p4"
 # ---- 二次侧辅助：F2 流量 + 两泵 ----
 [[sim.sec.aux]]
 sensor_id = "cdu.sec.aux.f2"
-name = "Secondary Flow F2"
+name = "F2"
 kind = "flow"
 unit = "LPM"
 formula = "10 + (pump1_duty + pump2_duty) * 1.1 + 0.7 * sin(t)"  # 两泵并联总流量∝Σduty
