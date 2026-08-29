@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+
+  "env": {
+    "browser": true,
+    "es2022": true,
+    "node": true
+  },
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "plugins": ["import", "jsx-a11y", "oxc", "react", "typescript", "unicorn"],
+  "rules": {
+    "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "no-debugger": "error",
+    "eqeqeq": "error",
+    "curly": "allow",
+    "no-var": "error",
+    "max-statements": "allow",
+    "prefer-const": "error",
+    "unicorn/prefer-global-this": "off",
+    "import/no-unassigned-import": "off",
+    "no-shadow": "off",
+    "no-unused-expressions": "off",
+    "capitalized-comments": "off",
+    "sort-keys": "off",
+    "id-length": "off",
+    "filename-case": "off",
+    "unicorn/filename-case": "off",
+    "unicorn/no-null": "off",
+    "import/prefer-default-export": "off",
+    "import/no-named-export": "off",
+    "no-magic-numbers": "off",
+    "prefer-named-capture-group": "off",
+    "func-style": "off",
+    "sort-imports": "off"
+  },
+  "ignorePatterns": [".agents/**"]
+}

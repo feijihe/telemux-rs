@@ -1,29 +1,26 @@
 <!doctype html>
 <html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telemux-Sim · CDU 仿真器</title>
+    <script>
+      // 首屏防闪烁：在 React 挂载前根据 localStorage/系统偏好给 <html> 加 dark class
+      ;(function () {
+        try {
+          var t = localStorage.getItem("telemux-theme")
+          var dark =
+            t === "dark" ||
+            ((!t || t === "system") && window.matchMedia("(prefers-color-scheme: dark)").matches)
+          document.documentElement.classList.toggle("dark", dark)
+          document.documentElement.style.colorScheme = dark ? "dark" : "light"
+        } catch (e) {}
+      })()
+    </script>
+  </head>
 
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Telemux-Sim · CDU 仿真器</title>
-  <script>
-    // 首屏防闪烁：在 React 挂载前根据 localStorage/系统偏好给 <html> 加 dark class
-    (function () {
-      try {
-        var t = localStorage.getItem("telemux-theme");
-        var dark =
-          t === "dark" ||
-          ((!t || t === "system") &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
-        document.documentElement.style.colorScheme = dark ? "dark" : "light";
-      } catch (e) { }
-    })();
-  </script>
-</head>
-
-<body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.tsx"></script>
-</body>
-
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

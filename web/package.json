@@ -7,9 +7,15 @@
     "dev": "pnpm -r --parallel --filter './apps/*' run dev",
     "dev:sim": "pnpm --filter sim-ui run dev",
     "dev:dashboard": "pnpm --filter dashboard run dev",
-    "typecheck": "pnpm -r run typecheck"
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
   "devDependencies": {
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
     "typescript": "catalog:"
   },
   "engines": {

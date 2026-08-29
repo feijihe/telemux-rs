@@ -6,10 +6,7 @@ type Resolved = "light" | "dark"
 const STORAGE_KEY = "telemux-theme"
 
 function systemPrefersDark(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-color-scheme: dark)").matches
-  )
+  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
 }
 
 function resolveTheme(theme: Theme): Resolved {
@@ -40,7 +37,7 @@ let currentState: State = (() => {
 const listeners = new Set<() => void>()
 
 function notify() {
-  listeners.forEach((l) => l())
+  listeners.forEach(l => l())
 }
 
 function setTheme(theme: Theme) {

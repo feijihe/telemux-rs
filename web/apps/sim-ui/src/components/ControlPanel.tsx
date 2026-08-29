@@ -1,46 +1,56 @@
-import { useEffect, useState } from "react";
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Input, Label } from "@telemux/ui";
-import { Fan, Thermometer, Waves } from "lucide-react";
-import type { SimState } from "@telemux/ui";
-import { setControl } from "../hooks/useSimState";
+import type { SimState } from "@telemux/ui"
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+} from "@telemux/ui"
+import { Fan, Thermometer, Waves } from "lucide-react"
+import { useEffect, useState } from "react"
+import { setControl } from "../hooks/useSimState"
 
 interface FieldDef {
-  control: string;
-  label: string;
-  unit: string;
-  step: number;
+  control: string
+  label: string
+  unit: string
+  step: number
 }
 
 const TEMP_FIELDS: FieldDef[] = [
   { control: "primary_cold_temp", label: "一次侧冷水 T1", unit: "°C", step: 0.5 },
   { control: "secondary_hot_temp", label: "二次侧热水 T5", unit: "°C", step: 0.5 },
-];
+]
 
 const DUTY_FIELDS: FieldDef[] = [
   { control: "pump1_duty", label: "Pump1 duty", unit: "%", step: 1 },
   { control: "pump2_duty", label: "Pump2 duty", unit: "%", step: 1 },
   { control: "valve1_duty", label: "Valve1 duty", unit: "%", step: 1 },
   { control: "fan_duty", label: "Fan duty", unit: "%", step: 1 },
-];
+]
 
 function FieldRow({ def, value }: { def: FieldDef; value: number }) {
-  const [local, setLocal] = useState<string>(String(value));
+  const [local, setLocal] = useState<string>(String(value))
   // 外部值变化且输入框未聚焦时同步（避免打断用户编辑）
-  const [focused, setFocused] = useState(false);
+  const [focused, setFocused] = useState(false)
   useEffect(() => {
-    if (!focused) setLocal(String(value));
-  }, [value, focused]);
+    if (!focused) setLocal(String(value))
+  }, [value, focused])
 
   const apply = async () => {
-    const n = parseFloat(local);
-    if (Number.isNaN(n)) return;
-    const ok = await setControl(def.control, n);
-    if (ok) setLocal(String(n));
-  };
+    const n = parseFloat(local)
+    if (Number.isNaN(n)) return
+    const ok = await setControl(def.control, n)
+    if (ok) setLocal(String(n))
+  }
 
   return (
     <div className="flex items-center gap-2 py-1">
-      <Label className="w-24 shrink-0 text-xs text-right text-muted-foreground">{def.label}</Label>
+      <Label className="text-muted-foreground w-24 shrink-0 text-right text-xs">{def.label}</Label>
       <Input
         type="number"
         step={def.step}
@@ -48,9 +58,9 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
         className="h-8 w-32"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
-        onChange={(e) => setLocal(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void apply();
+        onChange={e => setLocal(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Enter") void apply()
         }}
       />
       <Button type="button" size="sm" onClick={() => void apply()}>
@@ -60,24 +70,26 @@ function FieldRow({ def, value }: { def: FieldDef; value: number }) {
         {value} {def.unit}
       </Badge>
     </div>
-  );
+  )
 }
 
 export function ControlPanel({ state }: { state: SimState }) {
-  const controlValue = (name: string) => state.controls.find((c) => c.name === name)?.value ?? 0;
+  const controlValue = (name: string) => state.controls.find(c => c.name === name)?.value ?? 0
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Thermometer className="size-4 text-primary" />
+            <Thermometer className="text-primary size-4" />
             温度设定（立即生效）
           </CardTitle>
-          <CardDescription className="text-xs">设定一次侧冷水与二次侧热水目标温度。</CardDescription>
+          <CardDescription className="text-xs">
+            设定一次侧冷水与二次侧热水目标温度。
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {TEMP_FIELDS.map((f) => (
+          {TEMP_FIELDS.map(f => (
             <FieldRow key={f.control} def={f} value={controlValue(f.control)} />
           ))}
         </CardContent>
@@ -86,7 +98,7 @@ export function ControlPanel({ state }: { state: SimState }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Waves className="size-4 text-primary" />
+            <Waves className="text-primary size-4" />
             运行控制
           </CardTitle>
           <CardDescription className="text-xs">
@@ -97,11 +109,11 @@ export function ControlPanel({ state }: { state: SimState }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {DUTY_FIELDS.map((f) => (
+          {DUTY_FIELDS.map(f => (
             <FieldRow key={f.control} def={f} value={controlValue(f.control)} />
           ))}
         </CardContent>
       </Card>
     </div>
-  );
+  )
 }

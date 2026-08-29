@@ -11,10 +11,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "react": "catalog:",
-    "react-dom": "catalog:"
-  },
   "dependencies": {
     "@base-ui/react": "catalog:",
     "class-variance-authority": "catalog:",
@@ -27,5 +23,9 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "typescript": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:"
   }
 }
