@@ -145,20 +145,24 @@ impl SimConfig {
             .chain(self.sensors.iter())
     }
 
-    /// 从 TOML 文件加载并校验。文件顶层为 `[sim]` 表（与网关原配置一致）。
-    pub fn load(path: &Path) -> anyhow::Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("read sim config `{}`", path.display()))?;
+    /// 从 TOML 字符串解析并校验。文件顶层为 `[sim]` 表（与网关原配置一致）。
+    pub fn parse(text: &str) -> anyhow::Result<Self> {
         #[derive(Deserialize)]
         struct File {
             #[serde(default)]
             sim: SimConfig,
         }
-        let file: File = toml::from_str(&text)
-            .with_context(|| format!("parse sim config `{}`", path.display()))?;
+        let file: File = toml::from_str(text)?;
         let cfg = file.sim;
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// 从 TOML 文件加载并校验。
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("read sim config `{}`", path.display()))?;
+        Self::parse(&text).with_context(|| format!("parse sim config `{}`", path.display()))
     }
 
     /// 校验：控制变量名唯一、传感器 id 唯一、表达式可解析、inputs 目标存在、

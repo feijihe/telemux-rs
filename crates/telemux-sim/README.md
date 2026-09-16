@@ -10,9 +10,18 @@
 
 ## 运行
 
+默认仿真配置 `config/cdu.toml` 已编译期嵌入二进制，**直接运行/双击即可**（无需携带配置文件）：
+
 ```bash
-cargo run -p telemux-sim -- --config crates/telemux-sim/config/cdu.toml \
-    --modbus-port 1502 --web-port 8082
+cargo run -p telemux-sim
+# 或运行 release 产物 target/release/telemux-sim(.exe)
+```
+
+换用其它仿真配置（如对齐外部 CDU 寄存器映射的 `cdu2.toml`）：
+
+```bash
+cargo run -p telemux-sim -- --config crates/telemux-sim/config/cdu2.toml
+# 运行时：telemux-sim --config config/cdu2.toml
 ```
 
 - Modbus-TCP 从站：`1502`

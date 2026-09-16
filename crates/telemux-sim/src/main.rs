@@ -3,12 +3,16 @@
 //! 用法：
 //!   telemux-sim [--config config/cdu.toml] [--modbus-port 1502] [--web-port 8082]
 //!
+//! 缺省仿真配置已在编译期嵌入（config/cdu.toml），裸跑/双击即可使用；
+//! 需要换用其它仿真配置时再传 `--config`。
+//!
 //! 网关侧把设备配置为 `transport = "tcp"` + `host/port` 指向本从站，
 //! 与连接真实 CDU 完全同构（见 `docs/SIMULATION.md`）。
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
 use clap::Parser;
 use tokio::sync::watch;
 use tracing::info;
@@ -23,9 +27,9 @@ use telemux_sim::server::{run as run_modbus, SimSlaveState};
     about = "CDU 仿真器：物理模型 + Modbus-TCP 从站 + 网页 UI"
 )]
 struct Cli {
-    /// 仿真配置文件（TOML，`[sim]` 段）
-    #[arg(short, long, default_value = "config/cdu.toml")]
-    config: PathBuf,
+    /// 仿真配置文件（TOML，`[sim]` 段）；缺省使用编译期嵌入的 config/cdu.toml
+    #[arg(short, long)]
+    config: Option<PathBuf>,
     /// Modbus-TCP 从站端口
     #[arg(long, default_value_t = 1502)]
     modbus_port: u16,
@@ -42,7 +46,11 @@ async fn main() -> anyhow::Result<()> {
     ).init();
 
     let cli = Cli::parse();
-    let config = SimConfig::load(&cli.config)?;
+    let config = match &cli.config {
+        Some(path) => SimConfig::load(path)?,
+        None => SimConfig::parse(include_str!("../config/cdu2.toml"))
+            .context("parse embedded sim config")?,
+    };
     info!(
         "telemux-sim starting: {} control(s), {} sensor(s)",
         config.controls.len(),
