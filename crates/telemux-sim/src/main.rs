@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = match &cli.config {
         Some(path) => SimConfig::load(path)?,
-        None => SimConfig::parse(include_str!("../config/cdu2.toml"))
+        None => SimConfig::parse(include_str!("../config/cdu_150kw_s6.toml"))
             .context("parse embedded sim config")?,
     };
     info!(

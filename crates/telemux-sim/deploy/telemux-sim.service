@@ -1,0 +1,49 @@
+# telemux-sim systemd 服务单元（CDU 仿真器：Modbus-TCP 从站 + 网页 UI）。
+#
+# 安装（推荐用脚本，会同时写入 sim.env）：
+#   sudo ./deploy/install.sh [--config config/cdu.toml]
+# 手动安装：
+#   1. install -m 0755 telemux-sim /usr/local/bin/telemux-sim
+#   2. mkdir -p /etc/telemux-sim
+#      printf 'TELEMUX_SIM_ARGS=--modbus-port 1502 --web-port 8082\nRUST_LOG=info\n' \
+#        > /etc/telemux-sim/sim.env
+#   3. install -m 0644 deploy/telemux-sim.service /etc/systemd/system/
+#   4. systemctl daemon-reload && systemctl enable --now telemux-sim
+#
+# 说明：
+#   - 启动参数集中在 /etc/telemux-sim/sim.env：$TELEMUX_SIM_ARGS 按空格拆分为多个命令行
+#     参数（未设置则为空）；不含 --config 时使用二进制编译期嵌入的仿真配置（自包含）。
+#   - 网页 UI 固定监听 127.0.0.1（代码内硬编码），远程访问需 SSH 端口转发：
+#       ssh -L 8082:127.0.0.1:8082 <user>@<arm64-host>
+#     Modbus-TCP 从站监听 0.0.0.0，供网关 / SCADA 直接连接。
+#   - 仿真器无持久化状态，收到 SIGTERM 直接退出（未做优雅收尾，port 释放即可重启）。
+#   - 卸载：systemctl disable --now telemux-sim
+#           rm -f /etc/systemd/system/telemux-sim.service
+#           rm -rf /etc/telemux-sim /usr/local/bin/telemux-sim
+
+[Unit]
+Description=Telemux CDU Simulator (Modbus-TCP slave + web UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/telemux-sim/sim.env
+# 等价写法（不用 sim.env 时）：ExecStart=/usr/local/bin/telemux-sim --config /etc/telemux-sim/sim.toml --modbus-port 1502 --web-port 8082
+ExecStart=/usr/local/bin/telemux-sim $TELEMUX_SIM_ARGS
+Restart=on-failure
+RestartSec=5
+# 仿真器为单线程 tokio 运行时，资源占用很低
+MemoryMax=256M
+LimitNOFILE=1024
+# 安全加固：动态用户运行；监听端口 1502/8082 均 > 1024，无需特权
+DynamicUser=yes
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

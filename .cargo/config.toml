@@ -1,0 +1,7 @@
+# 交叉编译 aarch64 (Linux, musl) —— 见 crates/telemux/docs/CROSS_COMPILE.md
+#
+# rust-std 的 musl target 自带 self-contained 链接材料（crt1.o/libc.a），
+# 直接用 rustc 附带的 rust-lld 即可链接，无需 aarch64-gcc / sysroot。
+# 仅对 aarch64-unknown-linux-musl 生效，不影响本地 Windows 构建。
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"

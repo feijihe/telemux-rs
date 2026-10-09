@@ -153,9 +153,10 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
         .collect();
 
     // 寄存器地图原始值：保持区（控制 + holding 传感器）+ 输入区（f32 解码 / u16 原始）。
-    let holding: Vec<Value> = (0..slave.map.holding.len())
-        .map(|i| {
-            let slot = slave.map.holding[i].as_ref().map(|s| match s {
+    let holding: Vec<Value> = slave.map.holding.iter()
+        .enumerate()
+        .filter_map(|(i, s_opt)| {
+            let slot = s_opt.as_ref().map(|s| match s {
                 crate::registers::HoldingSlot::Control { control, writable } => json!({
                     "type": "control",
                     "control": control,
@@ -170,11 +171,11 @@ fn build_state_json(slave: &SimSlaveState) -> Value {
                     },
                 }),
             });
-            json!({
+            slot.map(|slot_val| json!({
                 "addr": i,
-                "slot": slot,
+                "slot": slot_val,
                 "raw": slave.map.read_holding(&engine, i),
-            })
+            }))
         })
         .collect();
     let inputs: Vec<Value> = {
